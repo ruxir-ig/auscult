@@ -1,0 +1,23 @@
+[project]
+name = "auscult"
+version = "0.1.0"
+description = "Passive observability layer for for healtcare AI agents"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+	"sqlalchemy>=2.0",
+	"psycopg2-binary",
+	"presidio-analyzer",
+	"presidio-anonymizer",
+	"faker",
+]
+
+[project.scripts]
+auscult = "auscult.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auscult"]
