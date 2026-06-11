@@ -23,19 +23,74 @@ ENTITY_TYPES: list[str] = [
     "US_SSN",
     "MEDICAL_LICENSE",
     "MEDICAL_RECORD_NUMBER",
+    "PATIENT_ID",
+    "STREET_ADDRESS",
 ]
 
-_MRN_RECOGNIZER = PatternRecognizer(
-    supported_entity="MEDICAL_RECORD_NUMBER",
-    name="MedicalRecordNumberRecognizer",
-    patterns=[
-        Pattern(
-            name="mrn",
-            regex=r"\bMRN[\s:#-]*\d{4,12}\b",
-            score=0.9,
-        ),
-    ],
-)
+_CUSTOM_RECOGNIZERS = [
+    PatternRecognizer(
+        supported_entity="MEDICAL_RECORD_NUMBER",
+        name="MedicalRecordNumberRecognizer",
+        patterns=[
+            Pattern(
+                name="mrn_abbrev",
+                regex=r"\b(?:MRN|MR)[\s:#-]*\d{4,12}\b",
+                score=0.9,
+            ),
+            Pattern(
+                name="mrn_spelled_out",
+                regex=r"\b[Mm]edical [Rr]ecord (?:[Nn]umber|[Nn]o\.?)[\s:#-]*\d{4,12}\b",
+                score=0.9,
+            ),
+        ],
+    ),
+    PatternRecognizer(
+        supported_entity="PATIENT_ID",
+        name="PatientIdRecognizer",
+        patterns=[
+            Pattern(
+                name="patient_id_labeled",
+                regex=r"\b(?:[Pp]atient(?:\s+(?:ID|[Ii]d|[Nn]umber|[Nn]o\.?))?|PT|PID)[\s:#-]*\d{4,12}\b",
+                score=0.85,
+            ),
+        ],
+    ),
+    PatternRecognizer(
+        supported_entity="STREET_ADDRESS",
+        name="StreetAddressRecognizer",
+        patterns=[
+            Pattern(
+                name="us_street_address",
+                regex=(
+                    r"\b\d{1,5}\s+(?:[A-Z][A-Za-z]*\.?\s+){1,3}"
+                    r"(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|"
+                    r"Drive|Dr|Court|Ct|Place|Pl|Way|Terrace|Ter|Circle|Cir)\.?"
+                    r"(?:,?\s+(?:Apt|Suite|Ste|Unit)\.?\s*#?\s*\w+)?\b"
+                ),
+                score=0.75,
+            ),
+        ],
+    ),
+    PatternRecognizer(
+        supported_entity="DATE_TIME",
+        name="DobRecognizer",
+        patterns=[
+            Pattern(
+                name="dob_labeled",
+                regex=(
+                    r"\b(?:DOB|[Dd]ate of [Bb]irth|[Bb]orn(?:\s+on)?)[\s:]*"
+                    r"(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2})\b"
+                ),
+                score=0.9,
+            ),
+            Pattern(
+                name="numeric_date",
+                regex=r"\b(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2})\b",
+                score=0.6,
+            ),
+        ],
+    ),
+]
 
 
 @lru_cache(maxsize=1)
@@ -51,7 +106,8 @@ def _analyzer() -> AnalyzerEngine:
         nlp_engine=provider.create_engine(),
         supported_languages=["en"],
     )
-    analyzer.registry.add_recognizer(_MRN_RECOGNIZER)
+    for recognizer in _CUSTOM_RECOGNIZERS:
+        analyzer.registry.add_recognizer(recognizer)
     return analyzer
 
 
@@ -123,5 +179,9 @@ class Sanitizer:
                 return faker.bothify("??-#######").upper()
             case "MEDICAL_RECORD_NUMBER":
                 return faker.numerify("MRN-########")
+            case "PATIENT_ID":
+                return faker.numerify("PT-########")
+            case "STREET_ADDRESS":
+                return faker.street_address()
             case _:
                 return faker.numerify("ID-########")

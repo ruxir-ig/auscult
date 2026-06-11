@@ -1,8 +1,7 @@
 import uuid
-from datetime import datetime
 
-from .db import SessionLocal
-from .models import Run, Step
+from .db import get_session
+from .models import Run, Step, utcnow
 from .sanitizer import Sanitizer
 
 
@@ -24,7 +23,7 @@ class AuscultTracer:
             agent_type=agent_type,
             initial_prompt=self._sanitizer.sanitize(initial_prompt),
         )
-        with SessionLocal() as session:
+        with get_session() as session:
             session.add(run)
             session.commit()
 
@@ -46,16 +45,16 @@ class AuscultTracer:
             output=self._sanitizer.sanitize(output),
             error_message=self._sanitizer.sanitize(error_message),
         )
-        with SessionLocal() as session:
+        with get_session() as session:
             session.add(step)
             session.commit()
 
     def finish(self) -> None:
         status = "failed" if self._first_failed_step is not None else "completed"
-        with SessionLocal() as session:
+        with get_session() as session:
             run = session.get(Run, self.run_id)
             run.status = status
             run.failed_step = self._first_failed_step
             run.total_steps = self._step_count
-            run.finished_at = datetime.utcnow()
+            run.finished_at = utcnow()
             session.commit()

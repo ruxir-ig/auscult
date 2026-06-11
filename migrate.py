@@ -1,9 +1,9 @@
-from auscult.db import engine
+from auscult.db import get_engine
 from auscult.models import Base
 
 
 def main() -> None:
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(get_engine())
     print("Tables created (or already existed).")
 
 

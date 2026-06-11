@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from auscult.capture import AuscultTracer
-from auscult.db import SessionLocal
+from auscult.db import get_session
 from auscult.models import Run, Step
 
 PHI_VALUES = [
@@ -13,7 +13,7 @@ PHI_VALUES = [
 
 
 def _all_stored_text(run_id: str) -> str:
-    with SessionLocal() as session:
+    with get_session() as session:
         run = session.get(Run, run_id)
         steps = (
             session.execute(select(Step).where(Step.run_id == run_id))
@@ -54,7 +54,7 @@ def test_tracer_marks_run_completed(db) -> None:
     tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
     tracer.finish()
 
-    with SessionLocal() as session:
+    with get_session() as session:
         run = session.get(Run, tracer.run_id)
         assert run.status == "completed"
         assert run.total_steps == 1
@@ -68,7 +68,7 @@ def test_tracer_marks_run_failed_at_first_error(db) -> None:
     tracer.record_step(llm_command="order_labs()", output=None, error_message="timeout")
     tracer.finish()
 
-    with SessionLocal() as session:
+    with get_session() as session:
         run = session.get(Run, tracer.run_id)
         assert run.status == "failed"
         assert run.failed_step == 1

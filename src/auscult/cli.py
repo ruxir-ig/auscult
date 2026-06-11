@@ -1,9 +1,10 @@
 import argparse
+import os
 import sys
 
 from sqlalchemy import select
 
-from .db import SessionLocal
+from .db import get_session
 from .models import Run, Step
 
 
@@ -41,7 +42,7 @@ def _get_steps(session, run_id: str) -> list[Step]:
 
 
 def _cmd_runs() -> None:
-    with SessionLocal() as session:
+    with get_session() as session:
         runs = session.execute(select(Run).order_by(Run.started_at)).scalars().all()
 
         if not runs:
@@ -54,7 +55,7 @@ def _cmd_runs() -> None:
 
 
 def _cmd_run(run_id: str) -> None:
-    with SessionLocal() as session:
+    with get_session() as session:
         run = session.get(Run, run_id)
         if run is None:
             print(f"Run {run_id} not found.", file=sys.stderr)
@@ -70,7 +71,7 @@ def _cmd_run(run_id: str) -> None:
 
 
 def _cmd_steps(run_id: str) -> None:
-    with SessionLocal() as session:
+    with get_session() as session:
         run = session.get(Run, run_id)
         if run is None:
             print(f"Run {run_id} not found.", file=sys.stderr)
@@ -100,6 +101,10 @@ def main() -> None:
     steps_parser.add_argument("run_id", help="Run id whose steps to display.")
 
     args = parser.parse_args()
+
+    if "DATABASE_URL" not in os.environ:
+        print("DATABASE_URL is not set; cannot connect to the database.", file=sys.stderr)
+        sys.exit(2)
 
     if args.command == "runs":
         _cmd_runs()

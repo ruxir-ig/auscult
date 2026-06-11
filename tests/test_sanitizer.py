@@ -75,3 +75,64 @@ def test_none_and_empty_text_pass_through() -> None:
 def test_text_without_phi_unchanged() -> None:
     text = "Order a CBC panel and check inflammation markers."
     assert Sanitizer().sanitize(text) == text
+
+
+def test_replaces_street_address() -> None:
+    result = Sanitizer().sanitize("Patient lives at 1428 Elm Street, Apt 4B.")
+    assert "1428 Elm Street" not in result
+
+
+def test_replaces_mrn_variants() -> None:
+    sanitizer = Sanitizer()
+    for text, phi in [
+        ("Chart MRN#4829301 was flagged.", "4829301"),
+        ("See MRN 48293012 for history.", "48293012"),
+        ("Medical Record Number: 992834771 attached.", "992834771"),
+        ("Lookup medical record no. 5582901.", "5582901"),
+    ]:
+        assert phi not in sanitizer.sanitize(text)
+
+
+def test_replaces_dob_formats() -> None:
+    sanitizer = Sanitizer()
+    for text, phi in [
+        ("DOB: 01/05/1980 confirmed.", "01/05/1980"),
+        ("Date of birth 1980-01-05 on file.", "1980-01-05"),
+        ("Patient born on 5-1-80.", "5-1-80"),
+        ("DOB 01.05.1980 per intake form.", "01.05.1980"),
+    ]:
+        assert phi not in sanitizer.sanitize(text)
+
+
+def test_replaces_patient_id_without_mrn_label() -> None:
+    sanitizer = Sanitizer()
+    for text, phi in [
+        ("Patient ID: 48293012 admitted today.", "48293012"),
+        ("Records for PT-5582901 are pending.", "5582901"),
+        ("Flagged PID 99283477 for review.", "99283477"),
+        ("Patient 48293012 missed the appointment.", "48293012"),
+    ]:
+        assert phi not in sanitizer.sanitize(text)
+
+
+def test_clinical_free_text_strips_all_phi() -> None:
+    text = (
+        "Pt John Smith, DOB 03/14/1962, MRN#7728190, presented to clinic at "
+        "920 Maple Avenue with dyspnea. Spouse Mary Smith reachable at "
+        "646-555-0144. Follow-up scheduled for 04/02/2024; fax results to "
+        "msmith@example.org."
+    )
+    result = Sanitizer().sanitize(text)
+    for phi in [
+        "John Smith",
+        "03/14/1962",
+        "7728190",
+        "920 Maple Avenue",
+        "Mary Smith",
+        "646-555-0144",
+        "04/02/2024",
+        "msmith@example.org",
+    ]:
+        assert phi not in result
+    # Clinical content should survive.
+    assert "dyspnea" in result

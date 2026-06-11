@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from auscult.capture import AuscultTracer
-from auscult.db import SessionLocal
+from auscult.db import get_session
 from auscult.models import Run, Step
 
 
@@ -28,7 +28,7 @@ def main() -> None:
     tracer.finish()
     print("Run marked finished.\n")
 
-    with SessionLocal() as session:
+    with get_session() as session:
         print("=== runs ===")
         for run in session.execute(select(Run)).scalars():
             print(

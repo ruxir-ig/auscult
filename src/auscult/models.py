@@ -1,7 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utcnow() -> datetime:
+    """Naive UTC timestamp for DateTime columns (replaces deprecated utcnow)."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
@@ -17,7 +22,7 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String, default="running")
     failed_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_steps: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     steps: Mapped[list["Step"]] = relationship("Step", back_populates="run")
