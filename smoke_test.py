@@ -8,13 +8,13 @@ from auscult.models import Run, Step
 def main() -> None:
     tracer = AuscultTracer(
         agent_type="fake-agent",
-        initial_prompt="Diagnose the patient's symptoms.",
+        initial_prompt="Diagnose symptoms for John Smith, MRN: 48293012.",
     )
     print(f"Created run: {tracer.run_id}")
 
     tracer.record_step(
         llm_command="ask_patient(symptoms)",
-        output="Patient reports headache and fever.",
+        output="John Smith reports headache and fever. Callback: 212-555-0182.",
     )
     tracer.record_step(
         llm_command="lookup_conditions(['headache', 'fever'])",
@@ -22,7 +22,7 @@ def main() -> None:
     )
     tracer.record_step(
         llm_command="recommend_next_step()",
-        output="Order CBC panel.",
+        output="Order CBC panel and email results to john.smith@example.com.",
     )
 
     tracer.finish()

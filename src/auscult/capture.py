@@ -3,18 +3,26 @@ from datetime import datetime
 
 from .db import SessionLocal
 from .models import Run, Step
+from .sanitizer import Sanitizer
 
 
 class AuscultTracer:
+    """Records agent runs, sanitizing all free text before it is stored.
+
+    Raw patient text is never written to the database: every text field
+    passes through the per-run Sanitizer first.
+    """
+
     def __init__(self, agent_type: str, initial_prompt: str) -> None:
         self.run_id: str = str(uuid.uuid4())
         self._step_count: int = 0
         self._first_failed_step: int | None = None
+        self._sanitizer = Sanitizer()
 
         run = Run(
             id=self.run_id,
             agent_type=agent_type,
-            initial_prompt=initial_prompt,
+            initial_prompt=self._sanitizer.sanitize(initial_prompt),
         )
         with SessionLocal() as session:
             session.add(run)
@@ -34,9 +42,9 @@ class AuscultTracer:
         step = Step(
             run_id=self.run_id,
             step_index=step_index,
-            llm_command=llm_command,
-            output=output,
-            error_message=error_message,
+            llm_command=self._sanitizer.sanitize(llm_command),
+            output=self._sanitizer.sanitize(output),
+            error_message=self._sanitizer.sanitize(error_message),
         )
         with SessionLocal() as session:
             session.add(step)
