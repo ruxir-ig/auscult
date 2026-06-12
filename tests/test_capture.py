@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 
 from auscult.capture import AuscultTracer
@@ -59,6 +60,71 @@ def test_tracer_marks_run_completed(db) -> None:
         assert run.status == "completed"
         assert run.total_steps == 1
         assert run.failed_step is None
+        assert run.finished_at is not None
+
+
+def test_tracer_records_step_duration(db) -> None:
+    tracer = AuscultTracer(agent_type="test-agent", initial_prompt="Check vitals.")
+    tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
+
+    with get_session() as session:
+        step = (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .one()
+        )
+        assert step.time_for_completion is not None
+        assert step.time_for_completion >= 0
+
+
+def test_tracer_batches_commits_when_configured(db) -> None:
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Check vitals.",
+        commit_each_step=False,
+    )
+    tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
+    tracer.record_step(llm_command="order_labs()", output="CBC ordered.")
+
+    with get_session() as session:
+        assert session.get(Run, tracer.run_id) is not None
+        assert (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .all()
+            == []
+        )
+
+    tracer.finish()
+
+    with get_session() as session:
+        steps = (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .all()
+        )
+        assert len(steps) == 2
+
+
+def test_tracer_context_manager_finishes_run(db) -> None:
+    with AuscultTracer(agent_type="test-agent", initial_prompt="Check vitals.") as tracer:
+        tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
+
+    with get_session() as session:
+        run = session.get(Run, tracer.run_id)
+        assert run.status == "completed"
+        assert run.total_steps == 1
+
+
+def test_tracer_marks_run_failed_when_exception_escapes_context(db) -> None:
+    with pytest.raises(RuntimeError, match="agent crashed"):
+        with AuscultTracer(agent_type="test-agent", initial_prompt="Check vitals.") as tracer:
+            tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
+            raise RuntimeError("agent crashed")
+
+    with get_session() as session:
+        run = session.get(Run, tracer.run_id)
+        assert run.status == "failed"
         assert run.finished_at is not None
 
 

@@ -23,3 +23,9 @@ def _session_factory() -> sessionmaker[Session]:
 
 def get_session() -> Session:
     return _session_factory()()
+
+
+def reset_connection_state() -> None:
+    """Clear cached engine and session factory (for tests)."""
+    get_engine.cache_clear()
+    _session_factory.cache_clear()

@@ -1,10 +1,10 @@
-from auscult.db import get_engine
-from auscult.models import Base
+from alembic import command
+from alembic.config import Config
 
 
 def main() -> None:
-    Base.metadata.create_all(get_engine())
-    print("Tables created (or already existed).")
+    command.upgrade(Config("alembic.ini"), "head")
+    print("Migrations applied.")
 
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@ Passive observability and safe replay tool for healthcare AI agents.
 
 Auscult records what an AI agent did (prompt, steps, outputs, errors), sanitizes
 all free text with PHI detection before anything touches the database, and makes
-the resulting synthetic traces inspectable for debugging, QA, and audit — without
-leaking patient data.
+the resulting synthetic traces inspectable for debugging, QA, and audit, all that
+without leaking patient data.
 
 ## How it works
 
@@ -40,8 +40,16 @@ export DATABASE_URL=sqlite:////tmp/auscult.sqlite
 uv run migrate.py
 ```
 
-`DATABASE_URL` is read lazily, only when a database connection is actually
-needed, so `uv run auscult --help` works without it.
+`migrate.py` applies Alembic migrations (`alembic upgrade head`). For schema
+changes after the initial release, autogenerate a new revision:
+
+```bash
+uv run alembic revision --autogenerate -m "describe your change"
+uv run alembic upgrade head
+```
+
+`DATABASE_URL` is read lazily for application code, and from the environment
+when running migrations, so `uv run auscult --help` works without it.
 
 ## Usage
 
@@ -61,18 +69,37 @@ Inspect traces from the CLI:
 uv run auscult runs          # list all runs
 uv run auscult run <id>      # one run with all of its steps
 uv run auscult steps <id>    # just the steps of a run
+uv run auscult replay <id>   # playback a sanitized run step by step
 ```
 
-Run the smoke test end to end:
+Replay a run in Python (for QA or regression checks):
 
-```bash
-uv run smoke_test.py
+```python
+from auscult.replay import RunReplayer
+
+replayer = RunReplayer.from_run_id(run_id)
+
+# Playback: walk recorded steps without calling an agent
+for step in replayer.playback():
+    print(step.llm_command, "->", step.output or step.error_message)
+
+# Compare: re-run your agent handler and diff against the recording
+result = replayer.replay(my_agent_handler)  # handler(cmd) -> (output, error)
+assert result.all_matched
 ```
 
 ## Tests
 
 ```bash
 uv run pytest
+```
+
+Run the end-to-end integration test (capture, migrations, sanitization, replay):
+
+```bash
+uv run pytest tests/test_integration.py
+# or
+uv run smoke_test.py
 ```
 
 Tests cover PHI detection (names, phones, emails, dates/DOB formats, MRN

@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from .db import get_session
 from .models import Run, Step
+from .replay import RunNotFoundError, RunReplayer, format_playback
 
 
 def _print_run(run: Run) -> None:
@@ -70,6 +71,16 @@ def _cmd_run(run_id: str) -> None:
         _print_step(step)
 
 
+def _cmd_replay(run_id: str) -> None:
+    try:
+        run = RunReplayer.from_run_id(run_id).run
+    except RunNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+
+    print(format_playback(run), end="")
+
+
 def _cmd_steps(run_id: str) -> None:
     with get_session() as session:
         run = session.get(Run, run_id)
@@ -100,6 +111,11 @@ def main() -> None:
     steps_parser = subparsers.add_parser("steps", help="List the steps of a run.")
     steps_parser.add_argument("run_id", help="Run id whose steps to display.")
 
+    replay_parser = subparsers.add_parser(
+        "replay", help="Playback a sanitized run step by step."
+    )
+    replay_parser.add_argument("run_id", help="Run id to replay.")
+
     args = parser.parse_args()
 
     if "DATABASE_URL" not in os.environ:
@@ -112,6 +128,8 @@ def main() -> None:
         _cmd_run(args.run_id)
     elif args.command == "steps":
         _cmd_steps(args.run_id)
+    elif args.command == "replay":
+        _cmd_replay(args.run_id)
 
 
 if __name__ == "__main__":

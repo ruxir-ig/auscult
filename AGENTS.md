@@ -13,8 +13,10 @@ Passive observability and safe replay tool for healthcare AI agents.
 ## Project structure
 - src/auscult/ contains all package code
 - models.py defines the Run and Step tables
+- alembic/ contains database migrations
 - db.py handles the database connection
 - capture.py contains the AuscultTracer class
+- replay.py loads and replays sanitized runs
 - cli.py contains the command line interface
 
 ## Conventions
@@ -26,5 +28,6 @@ Passive observability and safe replay tool for healthcare AI agents.
 
 ## Running the project
 - uv sync to install dependencies
-- uv run migrate.py to create tables
+- uv run migrate.py to apply Alembic migrations
+- uv run alembic revision --autogenerate -m "message" to create schema revisions
 - uv run auscult to use the CLI

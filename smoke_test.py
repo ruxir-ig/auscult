@@ -1,50 +1,10 @@
-from sqlalchemy import select
+"""Run the end-to-end integration test suite."""
 
-from auscult.capture import AuscultTracer
-from auscult.db import get_session
-from auscult.models import Run, Step
+import pytest
 
 
 def main() -> None:
-    tracer = AuscultTracer(
-        agent_type="fake-agent",
-        initial_prompt="Diagnose symptoms for John Smith, MRN: 48293012.",
-    )
-    print(f"Created run: {tracer.run_id}")
-
-    tracer.record_step(
-        llm_command="ask_patient(symptoms)",
-        output="John Smith reports headache and fever. Callback: 212-555-0182.",
-    )
-    tracer.record_step(
-        llm_command="lookup_conditions(['headache', 'fever'])",
-        output="Possible: flu, migraine, sinus infection.",
-    )
-    tracer.record_step(
-        llm_command="recommend_next_step()",
-        output="Order CBC panel and email results to john.smith@example.com.",
-    )
-
-    tracer.finish()
-    print("Run marked finished.\n")
-
-    with get_session() as session:
-        print("=== runs ===")
-        for run in session.execute(select(Run)).scalars():
-            print(
-                f"id={run.id} agent_type={run.agent_type} status={run.status} "
-                f"total_steps={run.total_steps} failed_step={run.failed_step} "
-                f"started_at={run.started_at} finished_at={run.finished_at} "
-                f"initial_prompt={run.initial_prompt!r}"
-            )
-
-        print("\n=== steps ===")
-        for step in session.execute(select(Step).order_by(Step.run_id, Step.step_index)).scalars():
-            print(
-                f"run_id={step.run_id} step_index={step.step_index} "
-                f"llm_command={step.llm_command!r} output={step.output!r} "
-                f"error_message={step.error_message!r}"
-            )
+    raise SystemExit(pytest.main(["-v", "tests/test_integration.py"]))
 
 
 if __name__ == "__main__":
