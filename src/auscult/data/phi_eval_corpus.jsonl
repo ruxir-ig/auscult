@@ -1,0 +1,15 @@
+{"id": "phi-person-phone", "text": "Call John Smith at 212-555-0182 about the CBC.", "entities": [{"entity_type": "PERSON", "start": 5, "end": 15}, {"entity_type": "PHONE_NUMBER", "start": 19, "end": 31}]}
+{"id": "phi-email-mrn", "text": "Email results for MRN: 48293012 to john.smith@example.com.", "entities": [{"entity_type": "MEDICAL_RECORD_NUMBER", "start": 18, "end": 31}, {"entity_type": "EMAIL_ADDRESS", "start": 35, "end": 57}]}
+{"id": "phi-dob-address", "text": "DOB: 03/14/1962, lives at 920 Maple Avenue.", "entities": [{"entity_type": "DATE_TIME", "start": 5, "end": 15}, {"entity_type": "STREET_ADDRESS", "start": 26, "end": 42}]}
+{"id": "phi-patient-id", "text": "Patient ID: 5582901 missed the appointment.", "entities": [{"entity_type": "PATIENT_ID", "start": 0, "end": 19}]}
+{"id": "phi-clinical-note", "text": "Pt Mary Johnson, DOB 01/05/1980, MRN#7728190 presented with dyspnea.", "entities": [{"entity_type": "PERSON", "start": 3, "end": 15}, {"entity_type": "DATE_TIME", "start": 21, "end": 31}, {"entity_type": "MEDICAL_RECORD_NUMBER", "start": 33, "end": 44}]}
+{"id": "neg-eponym-parkinson", "text": "Differential includes Parkinson's disease and tremor.", "entities": []}
+{"id": "neg-eponym-addison", "text": "Labs consistent with Addison's disease; start hydrocortisone.", "entities": []}
+{"id": "neg-eponym-crohn", "text": "History of Crohn's disease; continue mesalamine.", "entities": []}
+{"id": "neg-drug-lab", "text": "Order a CBC panel and check inflammation markers.", "entities": []}
+{"id": "neg-vitals-meds", "text": "BP 120/80. Continue ibuprofen 400mg and metformin.", "entities": []}
+{"id": "neg-conditions", "text": "Possible: flu, migraine, sinus infection.", "entities": []}
+{"id": "phi-badge-deny", "text": "Assigned nurse BADGE:A12B34 on floor 3.", "entities": [{"entity_type": "CUSTOM_IDENTIFIER", "start": 15, "end": 27}]}
+{"id": "phi-case-deny", "text": "Opened CASE#99887766 for follow-up.", "entities": [{"entity_type": "CUSTOM_IDENTIFIER", "start": 7, "end": 20}]}
+{"id": "mixed-eponym-and-phi", "text": "John Smith has Parkinson's disease; callback 646-555-0144.", "entities": [{"entity_type": "PERSON", "start": 0, "end": 10}, {"entity_type": "PHONE_NUMBER", "start": 45, "end": 57}]}
+{"id": "neg-alzheimer", "text": "Workup for Alzheimer's disease is pending.", "entities": []}

@@ -14,9 +14,11 @@ from typing import Any
 from sqlalchemy import select
 
 from .db import get_session
+from .eval import evaluate, format_report
 from .export import export_run, purge_runs_before
 from .models import Run, Step
 from .replay import RunNotFoundError, RunReplayer, format_playback
+from .sanitizer import Sanitizer
 
 
 def _print_run(run: Run) -> None:
@@ -410,6 +412,30 @@ def _cmd_purge(
         print(f"  {run_id}")
 
 
+def _cmd_eval(
+    *,
+    corpus: str | None,
+    nlp_model: str | None,
+    dual_pass_model: str | None,
+    score_threshold: float | None,
+    verbose: bool,
+    as_json: bool,
+) -> None:
+    sanitizer = Sanitizer(
+        nlp_model=nlp_model,
+        dual_pass_model=dual_pass_model,
+        score_threshold=score_threshold,
+    )
+    report = evaluate(sanitizer=sanitizer, corpus_path=corpus)
+    if as_json:
+        _emit_json(report.to_dict())
+    else:
+        print(format_report(report, verbose=verbose), end="")
+    # Non-zero exit when recall is catastrophically low (likely misconfig).
+    if report.recall < 0.5 and report.true_positives + report.false_negatives > 0:
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="auscult")
     parser.add_argument(
@@ -492,7 +518,47 @@ def main() -> None:
     )
     purge_parser.add_argument("--agent-type", help="Limit purge to one agent_type.")
 
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Score PHI detection precision/recall on the golden corpus.",
+    )
+    eval_parser.add_argument(
+        "--corpus",
+        help="Path to a JSONL corpus (default: packaged phi_eval_corpus.jsonl).",
+    )
+    eval_parser.add_argument(
+        "--nlp-model",
+        help="Primary spaCy model (default: AUSCULT_SPACY_MODEL / en_core_web_lg).",
+    )
+    eval_parser.add_argument(
+        "--dual-pass-model",
+        help="Optional second spaCy model for PERSON/LOCATION ensemble recall.",
+    )
+    eval_parser.add_argument(
+        "--score-threshold",
+        type=float,
+        help="Presidio score threshold override.",
+    )
+    eval_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="List examples with false positives/negatives.",
+    )
+
     args = parser.parse_args()
+    as_json = bool(args.json)
+
+    # eval does not need a database.
+    if args.command == "eval":
+        _cmd_eval(
+            corpus=args.corpus,
+            nlp_model=args.nlp_model,
+            dual_pass_model=args.dual_pass_model,
+            score_threshold=args.score_threshold,
+            verbose=args.verbose,
+            as_json=as_json,
+        )
+        return
 
     if "DATABASE_URL" not in os.environ:
         print(
@@ -500,8 +566,6 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(2)
-
-    as_json = bool(args.json)
 
     if args.command == "runs":
         _cmd_runs(

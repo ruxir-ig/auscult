@@ -66,8 +66,9 @@ when running migrations, so `uv run auscult --help` works without it.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AUSCULT_SPACY_MODEL` | `en_core_web_lg` | spaCy model for NER. Use `en_core_web_trf` for best PERSON/LOCATION recall, or `en_core_web_sm` for faster local/test loads. |
+| `AUSCULT_SPACY_MODEL` | `en_core_web_lg` | Primary spaCy model for NER. Use `en_core_web_trf` for best PERSON/LOCATION recall, or `en_core_web_sm` for faster local/test loads (`uv sync --extra sm` or `--group dev`). |
 | `AUSCULT_SCORE_THRESHOLD` | `0.35` | Minimum Presidio confidence to redact. **Lower = more false positives redacted** (safer for PHI; may over-redact clinical eponyms that slip past the allow-list). |
+| `AUSCULT_DUAL_PASS_MODEL` | _(unset)_ | Optional second spaCy model (e.g. `en_core_web_trf`). When set, PERSON/LOCATION candidates from this model are merged with the primary pass for better recall without running the heavy model on every entity type. |
 
 Clinical disease eponyms (Parkinson, Addison, Crohn, …) are allow-listed so they
 are not treated as PERSON. Organization-specific patterns (e.g. `BADGE:…`,
@@ -83,8 +84,9 @@ Even though the DB is meant to hold synthetic data:
    the Auscult database; sanitized ≠ public.
 3. **Access control** — restrict who can `SELECT` from `runs` / `steps`; treat
    traces as PHI-adjacent until audited.
-4. **Validate detection** — sample runs periodically; watch `redaction_count`
-   drift via `auscult stats`.
+4. **Validate detection** — run `auscult eval` on the golden corpus after model /
+   threshold changes; watch `redaction_count` / `entity_counts` drift via
+   `auscult stats`.
 
 ## Usage
 
@@ -118,16 +120,16 @@ uv run auscult compare <id> --handler mypkg.handlers:my_agent_handler
 uv run auscult stats
 uv run auscult export <id> --format jsonl -o run.jsonl
 uv run auscult purge --before 2026-01-01 --dry-run
+uv run auscult eval --verbose
+uv run auscult eval --dual-pass-model en_core_web_trf
 uv run auscult --json runs --limit 10    # machine-readable output for scripting
 ```
 
-See [ROADMAP.md](ROADMAP.md) for planned follow-ups (PHI eval harness, dual-pass
-NER, optional small-model packaging, DB indexes).
+See [ROADMAP.md](ROADMAP.md) for later ideas (audit UI, per-tenant lists, metrics).
 
-### Scale note (indexes)
+### Indexes
 
-At low volume, unindexed filters are fine. Once `auscult runs --since` or
-`stats` scans large tables, add indexes via Alembic — tracked on the roadmap:
+Migrations create composite indexes for filtered list/stats queries:
 
 - `runs(agent_type, started_at)`, `runs(status, started_at)`
 - unique `(run_id, step_index)` on `steps`
@@ -150,8 +152,9 @@ assert result.all_matched
 ## Tests
 
 ```bash
-uv sync --group dev
+uv sync --group dev --extra sm
 AUSCULT_SPACY_MODEL=en_core_web_sm uv run pytest
+uv run auscult eval --nlp-model en_core_web_sm
 uv run ruff check src tests
 uv run mypy
 ```
@@ -167,15 +170,17 @@ uv run smoke_test.py
 Tests cover PHI detection (names, phones, emails, dates/DOB formats, MRN
 variants, bare patient IDs, street addresses, clinical free text), clinical
 allow-list / deny-list behavior, JSON payload structure preservation,
-replacement consistency, fail-closed capture on sanitizer errors, and a
-guarantee that raw PHI never reaches the database.
+replacement consistency, fail-closed capture on sanitizer errors, the golden
+eval corpus, dual-pass merge behavior, and a guarantee that raw PHI never
+reaches the database.
 
 ## Packaging note
 
-spaCy models are installed from wheel URLs declared in `[tool.uv.sources]` in
-`pyproject.toml` (`en_core_web_lg` by default, `en_core_web_sm` also packaged
-for tests/dev). This is uv-specific: if you ever build or install this package
-outside uv (plain pip, another resolver), that source table is ignored and you
-must install the model yourself, e.g. `python -m spacy download en_core_web_lg`.
-For `en_core_web_trf`, install the transformer model separately and set
-`AUSCULT_SPACY_MODEL=en_core_web_trf`.
+Production default dependency is `en_core_web_lg` only. Optional extras:
+
+- `uv sync --extra sm` — `en_core_web_sm` for fast local/CI loads
+- `uv sync --extra trf` — `en_core_web_trf` for dual-pass / best PERSON recall
+- `uv sync --group dev` — includes `sm` for tests
+
+spaCy models are installed from wheel URLs in `[tool.uv.sources]`. Outside uv
+(plain pip), install models yourself, e.g. `python -m spacy download en_core_web_lg`.

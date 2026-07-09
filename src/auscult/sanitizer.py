@@ -7,10 +7,15 @@ values so the same entity is replaced consistently within one run.
 Configuration (environment variables):
   AUSCULT_SPACY_MODEL   spaCy model name (default: en_core_web_lg).
                         Use en_core_web_trf for best PERSON/LOCATION recall,
-                        or en_core_web_sm for faster local/dev loads.
+                        or en_core_web_sm for faster local/dev loads
+                        (install the ``sm`` extra / ``--group dev``).
   AUSCULT_SCORE_THRESHOLD
                         Minimum Presidio confidence to redact (default: 0.35).
                         Lower = more false positives redacted (safer for PHI).
+  AUSCULT_DUAL_PASS_MODEL
+                        Optional second spaCy model (e.g. en_core_web_trf).
+                        When set, PERSON/LOCATION candidates from this model
+                        are merged with the primary pass (ensemble recall).
 """
 
 from __future__ import annotations
@@ -45,12 +50,16 @@ ENTITY_TYPES: list[str] = [
 ]
 
 # Production default favors recall over load time. Override with
-# AUSCULT_SPACY_MODEL=en_core_web_sm for fast local/test runs.
+# AUSCULT_SPACY_MODEL=en_core_web_sm for fast local/test runs (optional extra).
 DEFAULT_SPACY_MODEL = "en_core_web_lg"
 
 # Lower threshold = more redaction (safer for PHI, more false positives).
 # Presidio's per-recognizer defaults are often ~0.4–0.85; 0.35 biases safe.
 DEFAULT_SCORE_THRESHOLD = 0.35
+
+# Second-pass NER only contributes these types (pattern recognizers already
+# cover phones/emails/MRNs/etc. on the primary pass).
+_DUAL_PASS_ENTITY_TYPES: frozenset[str] = frozenset({"PERSON", "LOCATION"})
 
 # Disease / clinical terms that look like PERSON surnames. Matching is
 # case-insensitive whole-token; these are never redacted as PERSON/LOCATION.
@@ -218,6 +227,11 @@ def _env_score_threshold() -> float:
     return float(raw)
 
 
+def _env_dual_pass_model() -> str | None:
+    raw = os.environ.get("AUSCULT_DUAL_PASS_MODEL", "").strip()
+    return raw or None
+
+
 def _normalize_allowlist(terms: frozenset[str] | set[str] | list[str]) -> frozenset[str]:
     return frozenset(t.strip().lower() for t in terms if t and t.strip())
 
@@ -273,6 +287,7 @@ class Sanitizer:
         allowlist: frozenset[str] | set[str] | list[str] | None = None,
         denylist_patterns: list[tuple[str, str, float]] | None = None,
         seed: int | str | None = None,
+        dual_pass_model: str | None = None,
     ) -> None:
         self._faker = Faker()
         if seed is not None:
@@ -289,6 +304,14 @@ class Sanitizer:
             allowlist if allowlist is not None else DEFAULT_CLINICAL_ALLOWLIST
         )
         self._extra_denylist = denylist_patterns or []
+        # Explicit None means "read env"; empty string disables dual-pass.
+        if dual_pass_model is None:
+            self._dual_pass_model = _env_dual_pass_model()
+        else:
+            self._dual_pass_model = dual_pass_model or None
+        if self._dual_pass_model == self._nlp_model:
+            # Same model twice is wasted work; treat as single-pass.
+            self._dual_pass_model = None
         self.total_redactions: int = 0
         self.entity_counts: Counter[str] = Counter()
 
@@ -374,21 +397,40 @@ class Sanitizer:
             return False
         return True
 
+    def analyze(self, text: str) -> list[RecognizerResult]:
+        """Return Presidio analyzer results after allow/deny / dual-pass filtering."""
+        return self._analyze(text)
+
     def _analyze(self, text: str) -> list[RecognizerResult]:
         analyzer = _analyzer(self._nlp_model)
-        # Extra denylist patterns are instance-specific; apply via a one-off
-        # analyzer copy only when needed (rare). Default denylist is in cache.
-        results = analyzer.analyze(
-            text=text,
-            language="en",
-            entities=ENTITY_TYPES,
-            score_threshold=self._score_threshold,
+        results = list(
+            analyzer.analyze(
+                text=text,
+                language="en",
+                entities=ENTITY_TYPES,
+                score_threshold=self._score_threshold,
+            )
         )
+        if self._dual_pass_model:
+            results.extend(self._dual_pass_results(text))
+            results = self._dedupe_results(results)
         if self._extra_denylist:
             results = list(results) + self._analyze_extra_denylist(text)
             results = self._dedupe_results(results)
 
         return self._apply_allowlist(text, results)
+
+    def _dual_pass_results(self, text: str) -> list[RecognizerResult]:
+        """Second NER pass: PERSON/LOCATION only, merged for better recall."""
+        assert self._dual_pass_model is not None
+        secondary = _analyzer(self._dual_pass_model)
+        results = secondary.analyze(
+            text=text,
+            language="en",
+            entities=list(_DUAL_PASS_ENTITY_TYPES),
+            score_threshold=self._score_threshold,
+        )
+        return [r for r in results if r.entity_type in _DUAL_PASS_ENTITY_TYPES]
 
     def _analyze_extra_denylist(self, text: str) -> list[RecognizerResult]:
         found: list[RecognizerResult] = []

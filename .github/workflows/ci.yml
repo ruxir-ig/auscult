@@ -20,7 +20,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --extra sm
 
       - name: Ruff
         run: uv run ruff check src tests
@@ -32,3 +32,8 @@ jobs:
         env:
           AUSCULT_SPACY_MODEL: en_core_web_sm
         run: uv run pytest
+
+      - name: PHI eval harness
+        env:
+          AUSCULT_SPACY_MODEL: en_core_web_sm
+        run: uv run auscult --json eval --nlp-model en_core_web_sm
