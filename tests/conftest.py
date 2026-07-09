@@ -11,6 +11,7 @@ os.environ.setdefault("AUSCULT_SPACY_MODEL", "en_core_web_sm")
 import pytest
 from alembic import command
 from alembic.config import Config
+
 from auscult.db import get_engine, reset_connection_state
 from auscult.models import Base
 from auscult.sanitizer import reset_analyzer_cache

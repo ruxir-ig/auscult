@@ -61,7 +61,7 @@ def test_cmd_stats_json(db, capsys, monkeypatch) -> None:
 
 def test_cmd_compare_matches(db, capsys, monkeypatch, tmp_path) -> None:
     run_id, _ = _seed_runs(db)
-    handler_file = tmp_path / "handlers.py"
+    handler_file = tmp_path / "match_handlers.py"
     handler_file.write_text(
         "def echo(cmd):\n"
         "    if cmd == 'get_vitals()':\n"
@@ -72,7 +72,7 @@ def test_cmd_compare_matches(db, capsys, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         sys,
         "argv",
-        ["auscult", "--json", "compare", run_id, "--handler", "handlers:echo"],
+        ["auscult", "--json", "compare", run_id, "--handler", "match_handlers:echo"],
     )
     cli.main()
     payload = json.loads(capsys.readouterr().out)
@@ -81,13 +81,13 @@ def test_cmd_compare_matches(db, capsys, monkeypatch, tmp_path) -> None:
 
 def test_cmd_compare_exits_on_mismatch(db, monkeypatch, tmp_path) -> None:
     run_id, _ = _seed_runs(db)
-    handler_file = tmp_path / "handlers.py"
+    handler_file = tmp_path / "mismatch_handlers.py"
     handler_file.write_text("def bad(cmd):\n    return ('nope', None)\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(
         sys,
         "argv",
-        ["auscult", "compare", run_id, "--handler", "handlers:bad"],
+        ["auscult", "compare", run_id, "--handler", "mismatch_handlers:bad"],
     )
     with pytest.raises(SystemExit) as exc:
         cli.main()
@@ -96,7 +96,7 @@ def test_cmd_compare_exits_on_mismatch(db, monkeypatch, tmp_path) -> None:
 
 def test_cmd_runs_since_filter(db, capsys, monkeypatch) -> None:
     _seed_runs(db)
-    future = (datetime.utcnow() + timedelta(days=1)).isoformat()
+    future = (datetime.now() + timedelta(days=1)).isoformat()
     monkeypatch.setattr(sys, "argv", ["auscult", "--json", "runs", "--since", future])
     cli.main()
     payload = json.loads(capsys.readouterr().out)

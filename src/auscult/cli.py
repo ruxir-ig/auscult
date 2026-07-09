@@ -75,7 +75,7 @@ def _emit_json(payload: Any) -> None:
 
 
 def _get_steps(session: Any, run_id: str) -> list[Step]:
-    return (
+    return list(
         session.execute(
             select(Step).where(Step.run_id == run_id).order_by(Step.step_index)
         )
@@ -90,7 +90,8 @@ def _parse_since(value: str) -> datetime:
         return datetime.fromisoformat(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"invalid --since value {value!r}; use ISO-8601 (e.g. 2026-07-01 or 2026-07-01T12:00:00)"
+            f"invalid --since value {value!r}; "
+            "use ISO-8601 (e.g. 2026-07-01 or 2026-07-01T12:00:00)"
         ) from exc
 
 
@@ -103,7 +104,7 @@ def _load_handler(spec: str) -> Callable[[str], tuple[str | None, str | None]]:
     handler = getattr(module, func_name)
     if not callable(handler):
         raise TypeError(f"{spec} is not callable")
-    return handler
+    return handler  # type: ignore[no-any-return]
 
 
 def _cmd_runs(
@@ -300,7 +301,7 @@ def _cmd_stats(*, agent_type: str | None, as_json: bool) -> None:
         run_ids = [run.id for run in runs]
         steps: list[Step] = []
         if run_ids:
-            steps = (
+            steps = list(
                 session.execute(select(Step).where(Step.run_id.in_(run_ids)))
                 .scalars()
                 .all()

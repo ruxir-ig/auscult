@@ -237,7 +237,7 @@ def _analyzer(model_name: str) -> AnalyzerEngine:
 
 @lru_cache(maxsize=1)
 def _anonymizer() -> AnonymizerEngine:
-    return AnonymizerEngine()
+    return AnonymizerEngine()  # type: ignore[no-untyped-call]
 
 
 def reset_analyzer_cache() -> None:
@@ -299,7 +299,9 @@ class Sanitizer:
             for entity_type in {r.entity_type for r in results}
         }
         anonymized = _anonymizer().anonymize(
-            text=text, analyzer_results=results, operators=operators
+            text=text,
+            analyzer_results=results,  # type: ignore[arg-type]
+            operators=operators,
         ).text
         count = len(results)
         self.total_redactions += count
