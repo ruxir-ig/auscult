@@ -18,8 +18,10 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from functools import lru_cache, partial
+from hashlib import sha256
 
 from faker import Faker
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerResult
@@ -188,10 +190,21 @@ _CUSTOM_RECOGNIZERS = [
 
 @dataclass(frozen=True)
 class SanitizeResult:
-    """Sanitized text plus how many entities were redacted."""
+    """Sanitized text plus how many entities were redacted.
+
+    ``entity_counts`` maps entity type -> count for this call only (no raw
+    spans). Useful for audit / drift monitoring without storing PHI.
+    """
 
     text: str | None
     redaction_count: int
+    entity_counts: dict[str, int] = field(default_factory=dict)
+
+
+def _seed_from_run_id(run_id: str) -> int:
+    """Derive a stable 32-bit Faker seed from a run id."""
+    digest = sha256(run_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big")
 
 
 def _env_spacy_model() -> str:
@@ -259,8 +272,14 @@ class Sanitizer:
         score_threshold: float | None = None,
         allowlist: frozenset[str] | set[str] | list[str] | None = None,
         denylist_patterns: list[tuple[str, str, float]] | None = None,
+        seed: int | str | None = None,
     ) -> None:
         self._faker = Faker()
+        if seed is not None:
+            # int seed used directly; str (e.g. run_id) hashed for stability.
+            self._faker.seed_instance(
+                seed if isinstance(seed, int) else _seed_from_run_id(seed)
+            )
         self._mapping: dict[tuple[str, str], str] = {}
         self._nlp_model = nlp_model or _env_spacy_model()
         self._score_threshold = (
@@ -271,6 +290,7 @@ class Sanitizer:
         )
         self._extra_denylist = denylist_patterns or []
         self.total_redactions: int = 0
+        self.entity_counts: Counter[str] = Counter()
 
     def sanitize(self, text: str | None) -> str | None:
         """Sanitize text; returns only the sanitized string (API-compatible)."""
@@ -278,7 +298,7 @@ class Sanitizer:
 
     def sanitize_with_stats(self, text: str | None) -> SanitizeResult:
         if not text:
-            return SanitizeResult(text=text, redaction_count=0)
+            return SanitizeResult(text=text, redaction_count=0, entity_counts={})
 
         # Structured JSON payloads: walk string leaves so Faker commas/quotes
         # cannot corrupt object structure used later in replay comparisons.
@@ -290,7 +310,7 @@ class Sanitizer:
     def _sanitize_plain(self, text: str) -> SanitizeResult:
         results = self._analyze(text)
         if not results:
-            return SanitizeResult(text=text, redaction_count=0)
+            return SanitizeResult(text=text, redaction_count=0, entity_counts={})
 
         operators = {
             entity_type: OperatorConfig(
@@ -303,9 +323,15 @@ class Sanitizer:
             analyzer_results=results,  # type: ignore[arg-type]
             operators=operators,
         ).text
+        counts: Counter[str] = Counter(r.entity_type for r in results)
         count = len(results)
         self.total_redactions += count
-        return SanitizeResult(text=anonymized, redaction_count=count)
+        self.entity_counts.update(counts)
+        return SanitizeResult(
+            text=anonymized,
+            redaction_count=count,
+            entity_counts=dict(counts),
+        )
 
     def _sanitize_json(self, text: str) -> SanitizeResult:
         try:
@@ -314,13 +340,14 @@ class Sanitizer:
             return self._sanitize_plain(text)
 
         total = 0
+        merged: Counter[str] = Counter()
 
         def walk(value: object) -> object:
             nonlocal total
             if isinstance(value, str):
                 result = self._sanitize_plain(value)
                 total += result.redaction_count
-                # _sanitize_plain already bumped total_redactions
+                merged.update(result.entity_counts)
                 return result.text
             if isinstance(value, list):
                 return [walk(item) for item in value]
@@ -333,6 +360,7 @@ class Sanitizer:
         return SanitizeResult(
             text=json.dumps(sanitized_payload, ensure_ascii=False, separators=(",", ":")),
             redaction_count=total,
+            entity_counts=dict(merged),
         )
 
     @staticmethod

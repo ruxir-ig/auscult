@@ -1,8 +1,10 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 
 def utcnow() -> datetime:
@@ -24,6 +26,8 @@ class Run(Base):
     failed_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_steps: Mapped[int] = mapped_column(Integer, default=0)
     redaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Entity type -> count only (no raw spans). Used for detection-quality audit.
+    entity_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -41,5 +45,6 @@ class Step(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     time_for_completion: Mapped[float | None] = mapped_column(nullable=True)
     redaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    entity_counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     run: Mapped["Run"] = relationship("Run", back_populates="steps")

@@ -199,3 +199,25 @@ def test_custom_denylist_patterns() -> None:
     )
     result = sanitizer.sanitize("Route specimen to SITE-NYC001 today.")
     assert "SITE-NYC001" not in result
+
+
+def test_deterministic_seed_produces_stable_replacements() -> None:
+    text = "Call John Smith at 212-555-0182 about the CBC."
+    first = Sanitizer(seed="run-abc").sanitize(text)
+    second = Sanitizer(seed="run-abc").sanitize(text)
+    third = Sanitizer(seed="run-xyz").sanitize(text)
+    assert first == second
+    assert first != third
+    assert "John Smith" not in (first or "")
+
+
+def test_entity_counts_reported_without_raw_spans() -> None:
+    result = Sanitizer().sanitize_with_stats(
+        "Call John Smith at 212-555-0182 about the CBC."
+    )
+    assert result.entity_counts
+    assert all(isinstance(v, int) and v > 0 for v in result.entity_counts.values())
+    # Audit payload must not embed the original PHI spans as keys/values.
+    blob = str(result.entity_counts)
+    assert "John Smith" not in blob
+    assert "212-555-0182" not in blob

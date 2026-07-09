@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import select
 
 from .db import get_session
+from .export import export_run, purge_runs_before
 from .models import Run, Step
 from .replay import RunNotFoundError, RunReplayer, format_playback
 
@@ -27,6 +28,7 @@ def _print_run(run: Run) -> None:
     print(f"  total_steps:     {run.total_steps}")
     print(f"  failed_step:     {failed_step}")
     print(f"  redaction_count: {run.redaction_count}")
+    print(f"  entity_counts:   {run.entity_counts or {}}")
     print(f"  started_at:      {run.started_at.isoformat()}")
     print(f"  finished_at:     {finished}")
     print(f"  initial_prompt:  {run.initial_prompt}")
@@ -41,6 +43,7 @@ def _print_step(step: Step) -> None:
     if step.time_for_completion is not None:
         print(f"  duration:        {step.time_for_completion:.3f}s")
     print(f"  redaction_count: {step.redaction_count}")
+    print(f"  entity_counts:   {step.entity_counts or {}}")
 
 
 def _run_to_dict(run: Run) -> dict[str, Any]:
@@ -51,6 +54,7 @@ def _run_to_dict(run: Run) -> dict[str, Any]:
         "total_steps": run.total_steps,
         "failed_step": run.failed_step,
         "redaction_count": run.redaction_count,
+        "entity_counts": run.entity_counts or {},
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "initial_prompt": run.initial_prompt,
@@ -67,6 +71,7 @@ def _step_to_dict(step: Step) -> dict[str, Any]:
         "error_message": step.error_message,
         "time_for_completion": step.time_for_completion,
         "redaction_count": step.redaction_count,
+        "entity_counts": step.entity_counts or {},
     }
 
 
@@ -363,6 +368,48 @@ def _cmd_stats(*, agent_type: str | None, as_json: bool) -> None:
         )
 
 
+def _cmd_export(run_id: str, *, fmt: str, output: str | None) -> None:
+    try:
+        text = export_run(run_id, fmt=fmt)
+    except RunNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print(f"Wrote {fmt} export of run {run_id} to {output}")
+    else:
+        sys.stdout.write(text)
+
+
+def _cmd_purge(
+    *,
+    before: datetime,
+    dry_run: bool,
+    agent_type: str | None,
+    as_json: bool,
+) -> None:
+    deleted = purge_runs_before(before, dry_run=dry_run, agent_type=agent_type)
+    if as_json:
+        _emit_json(
+            {
+                "dry_run": dry_run,
+                "before": before.isoformat(),
+                "count": len(deleted),
+                "run_ids": deleted,
+            }
+        )
+        return
+    verb = "Would delete" if dry_run else "Deleted"
+    print(f"{verb} {len(deleted)} run(s) started before {before.isoformat()}.")
+    for run_id in deleted:
+        print(f"  {run_id}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="auscult")
     parser.add_argument(
@@ -410,6 +457,41 @@ def main() -> None:
     )
     stats_parser.add_argument("--agent-type", help="Limit stats to one agent_type.")
 
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export a sanitized run as JSON or JSONL (for offline QA / sharing).",
+    )
+    export_parser.add_argument("run_id", help="Run id to export.")
+    export_parser.add_argument(
+        "--format",
+        dest="fmt",
+        choices=("json", "jsonl"),
+        default="json",
+        help="Output format (default: json).",
+    )
+    export_parser.add_argument(
+        "-o",
+        "--output",
+        help="Write to this file instead of stdout.",
+    )
+
+    purge_parser = subparsers.add_parser(
+        "purge",
+        help="Delete finished runs started before a cutoff (retention).",
+    )
+    purge_parser.add_argument(
+        "--before",
+        type=_parse_since,
+        required=True,
+        help="Delete runs started before this ISO-8601 timestamp.",
+    )
+    purge_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matching runs without deleting.",
+    )
+    purge_parser.add_argument("--agent-type", help="Limit purge to one agent_type.")
+
     args = parser.parse_args()
 
     if "DATABASE_URL" not in os.environ:
@@ -439,6 +521,15 @@ def main() -> None:
         _cmd_compare(args.run_id, args.handler, as_json=as_json)
     elif args.command == "stats":
         _cmd_stats(agent_type=args.agent_type, as_json=as_json)
+    elif args.command == "export":
+        _cmd_export(args.run_id, fmt=args.fmt, output=args.output)
+    elif args.command == "purge":
+        _cmd_purge(
+            before=args.before,
+            dry_run=args.dry_run,
+            agent_type=args.agent_type,
+            as_json=as_json,
+        )
 
 
 if __name__ == "__main__":
