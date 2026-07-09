@@ -90,7 +90,61 @@ Even though the DB is meant to hold synthetic data:
 
 ## Usage
 
-Instrument an agent:
+### Plug into an existing agent (no loop rewrite)
+
+Most agents don't need explicit `record_step` calls. Wrap the LLM client (or
+pass a callback handler) once and every model call is captured automatically:
+
+```python
+from openai import OpenAI
+from auscult import observe_run
+from auscult.integrations.openai import wrap_openai
+
+client = wrap_openai(OpenAI())   # also: Azure / any OpenAI-compatible server
+
+@observe_run(agent_type="triage-agent")
+def run_triage(prompt: str) -> str:
+    # existing agent loop, unchanged — every chat.completions.create /
+    # responses.create call is sanitized and captured as a step
+    return my_existing_agent(client, prompt)
+```
+
+Anthropic works the same way via
+`auscult.integrations.anthropic.wrap_anthropic(client)` (patches
+`messages.create`).
+
+For LangChain / LangGraph (install with `uv sync --extra langchain`), pass a
+callback handler at invocation — the standard pluggable observability
+mechanism for those frameworks:
+
+```python
+from auscult.integrations.langchain import AuscultCallbackHandler
+
+handler = AuscultCallbackHandler(agent_type="triage-agent")
+result = graph.invoke(inputs, config={"callbacks": [handler]})
+print(handler.last_run_id)   # inspect with: uv run auscult run <id>
+```
+
+Each LLM call and tool call becomes one sanitized step; the run finishes when
+the root chain/graph ends (marked `failed` on error). The handler sets
+`raise_error`, so sanitizer/DB failures propagate (fail-closed) instead of
+being swallowed by LangChain.
+
+If you prefer explicit context, `start_run` activates an ambient run that all
+integrations record into (it propagates through `asyncio`, but not into
+`ThreadPoolExecutor` workers — pass `tracer=` explicitly there):
+
+```python
+from auscult import start_run, record_step
+
+with start_run("triage-agent", initial_prompt=prompt):
+    run_existing_agent(client, prompt)   # wrapped-client calls captured
+    record_step("manual_annotation()", output="anything else you want traced")
+```
+
+### Instrument by hand
+
+The explicit API is still there for custom loops:
 
 ```python
 from auscult.capture import AuscultTracer
@@ -108,7 +162,7 @@ with AuscultTracer(
     tracer.record_step(llm_command=command, output=output)
 ```
 
-Inspect traces from the CLI:
+### Inspect from the CLI
 
 ```bash
 uv run auscult runs
@@ -133,6 +187,9 @@ Migrations create composite indexes for filtered list/stats queries:
 
 - `runs(agent_type, started_at)`, `runs(status, started_at)`
 - unique `(run_id, step_index)` on `steps`
+
+### Replay in Python
+
 Replay a run in Python (for QA or regression checks):
 
 ```python
@@ -180,7 +237,9 @@ Production default dependency is `en_core_web_lg` only. Optional extras:
 
 - `uv sync --extra sm` — `en_core_web_sm` for fast local/CI loads
 - `uv sync --extra trf` — `en_core_web_trf` for dual-pass / best PERSON recall
-- `uv sync --group dev` — includes `sm` for tests
+- `uv sync --extra langchain` — `langchain-core` for the LangChain/LangGraph
+  callback handler (the OpenAI/Anthropic wrappers are duck-typed and need no extra)
+- `uv sync --group dev` — includes `sm` and `langchain-core` for tests
 
 spaCy models are installed from wheel URLs in `[tool.uv.sources]`. Outside uv
 (plain pip), install models yourself, e.g. `python -m spacy download en_core_web_lg`.
