@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -18,6 +18,10 @@ class Base(DeclarativeBase):
 
 class Run(Base):
     __tablename__ = "runs"
+    __table_args__ = (
+        Index("ix_runs_agent_type_started_at", "agent_type", "started_at"),
+        Index("ix_runs_status_started_at", "status", "started_at"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     agent_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -36,6 +40,9 @@ class Run(Base):
 
 class Step(Base):
     __tablename__ = "steps"
+    __table_args__ = (
+        UniqueConstraint("run_id", "step_index", name="uq_steps_run_id_step_index"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     run_id: Mapped[str] = mapped_column(String, ForeignKey("runs.id"), nullable=False)

@@ -11,8 +11,15 @@ dependencies = [
 	"presidio-anonymizer",
 	"faker",
 	"en-core-web-lg",
-	"en-core-web-sm",
 	"alembic>=1.18.4",
+]
+
+[project.optional-dependencies]
+sm = [
+	"en-core-web-sm",
+]
+trf = [
+	"en-core-web-trf",
 ]
 
 [project.scripts]
@@ -25,15 +32,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/auscult"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/auscult/data/phi_eval_corpus.jsonl" = "auscult/data/phi_eval_corpus.jsonl"
+
 [tool.uv.sources]
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 en-core-web-lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }
+en-core-web-trf = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "ruff>=0.14.0",
     "mypy>=1.18.0",
+    # Fast spaCy model for CI/tests; production default remains en-core-web-lg.
+    "en-core-web-sm",
 ]
 
 [tool.ruff]

@@ -221,3 +221,26 @@ def test_entity_counts_reported_without_raw_spans() -> None:
     blob = str(result.entity_counts)
     assert "John Smith" not in blob
     assert "212-555-0182" not in blob
+
+
+def test_dual_pass_merges_person_location_candidates() -> None:
+    # Using the same installed sm model as a second pass exercises the merge
+    # path without requiring the heavy transformer wheel in CI. Same-model
+    # dual-pass is normally no-op'd; force it by constructing with distinct
+    # names that resolve to analyzers we already have cached.
+    primary = Sanitizer(nlp_model="en_core_web_sm", dual_pass_model="")
+    dual = Sanitizer(nlp_model="en_core_web_sm", dual_pass_model="en_core_web_lg")
+    text = "Call John Smith at 212-555-0182 about the CBC."
+    primary_spans = {(r.entity_type, r.start, r.end) for r in primary.analyze(text)}
+    dual_spans = {(r.entity_type, r.start, r.end) for r in dual.analyze(text)}
+    # Dual pass should be a superset for PERSON/LOCATION (or equal if primary
+    # already found everything).
+    primary_pl = {s for s in primary_spans if s[0] in {"PERSON", "LOCATION"}}
+    dual_pl = {s for s in dual_spans if s[0] in {"PERSON", "LOCATION"}}
+    assert dual_pl >= primary_pl
+    assert "John Smith" not in (dual.sanitize(text) or "")
+
+
+def test_dual_pass_same_model_is_disabled() -> None:
+    sanitizer = Sanitizer(nlp_model="en_core_web_sm", dual_pass_model="en_core_web_sm")
+    assert sanitizer._dual_pass_model is None

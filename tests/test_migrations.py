@@ -26,6 +26,16 @@ def test_migrations_apply_from_empty_db(migration_db: None) -> None:
     assert "steps" in tables
     assert "alembic_version" in tables
 
+    run_indexes = {idx["name"] for idx in inspector.get_indexes("runs")}
+    assert "ix_runs_agent_type_started_at" in run_indexes
+    assert "ix_runs_status_started_at" in run_indexes
+
+    step_uniques = {
+        tuple(uq["column_names"])
+        for uq in inspector.get_unique_constraints("steps")
+    }
+    assert ("run_id", "step_index") in step_uniques
+
 
 def test_migrations_are_reversible(migration_db: None) -> None:
     cfg = Config("alembic.ini")
