@@ -1,3 +1,5 @@
+from sqlalchemy import select
+
 from auscult.capture import AuscultTracer
 from auscult.db import get_session
 from auscult.models import Step
@@ -7,7 +9,6 @@ from auscult.replay import (
     format_playback,
     load_run,
 )
-from sqlalchemy import select
 
 
 def _record_sample_run() -> str:
