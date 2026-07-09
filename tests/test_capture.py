@@ -172,7 +172,7 @@ def test_tracer_fail_closed_on_sanitizer_error(db) -> None:
                 raise RuntimeError("sanitizer exploded")
             from auscult.sanitizer import SanitizeResult
 
-            return SanitizeResult(text=text, redaction_count=0)
+            return SanitizeResult(text=text, redaction_count=0, entity_counts={})
 
     tracer = AuscultTracer(
         agent_type="test-agent",
@@ -194,3 +194,118 @@ def test_tracer_fail_closed_on_sanitizer_error(db) -> None:
         assert run.total_steps == 0
 
     tracer.finish(crashed=True)
+
+
+def test_tracer_records_entity_counts(db) -> None:
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Triage John Smith.",
+        run_id="fixed-run-id-for-seed",
+    )
+    tracer.record_step(
+        llm_command="lookup_patient('John Smith')",
+        output="Phone: 212-555-0182.",
+    )
+    tracer.finish()
+
+    with get_session() as session:
+        run = session.get(Run, tracer.run_id)
+        step = (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .one()
+        )
+        assert run.entity_counts
+        assert step.entity_counts
+        assert "John Smith" not in str(run.entity_counts)
+
+
+def test_tracer_background_writer_persists_steps(db) -> None:
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Check vitals for John Smith.",
+        background=True,
+        queue_maxsize=8,
+    )
+    tracer.record_step(llm_command="get_vitals()", output="BP 120/80.")
+    tracer.record_step(llm_command="order_labs()", output="CBC ordered.")
+    tracer.finish()
+
+    with get_session() as session:
+        run = session.get(Run, tracer.run_id)
+        steps = (
+            session.execute(
+                select(Step).where(Step.run_id == tracer.run_id).order_by(Step.step_index)
+            )
+            .scalars()
+            .all()
+        )
+        assert run.status == "completed"
+        assert run.total_steps == 2
+        assert len(steps) == 2
+        assert "John Smith" not in run.initial_prompt
+        assert run.entity_counts is not None
+
+
+def test_tracer_background_fail_closed_on_full_queue(db) -> None:
+    import threading
+
+    gate = threading.Event()
+
+    class BlockingSanitizer:
+        def sanitize_with_stats(self, text):
+            gate.wait(timeout=5)
+            from auscult.sanitizer import SanitizeResult
+
+            return SanitizeResult(text=text, redaction_count=0, entity_counts={})
+
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Check vitals.",
+        background=True,
+        queue_maxsize=1,
+        sanitizer=BlockingSanitizer(),  # type: ignore[arg-type]
+    )
+    # Prompt is sitting in the worker (blocked). Queue maxsize=1: one more
+    # item fills it; the next submit must fail closed.
+    tracer.record_step(llm_command="fill()", output="a")
+    with pytest.raises(RuntimeError, match="queue is full"):
+        tracer.record_step(llm_command="overflow()", output="b")
+    gate.set()
+    try:
+        tracer.finish(crashed=True)
+    except RuntimeError:
+        # Worker may have recorded the earlier failure; either outcome is fine.
+        pass
+
+
+def test_tracer_seeded_replacements_match_sanitizer(db) -> None:
+    run_id = "stable-seed-run"
+    prompt = "Triage patient."
+    output = "John Smith reports fever."
+
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt=prompt,
+        run_id=run_id,
+    )
+    tracer.record_step(llm_command="ask()", output=output)
+    tracer.finish()
+
+    from auscult.sanitizer import Sanitizer
+
+    # Replay the same sanitize call sequence the tracer used.
+    mirror = Sanitizer(seed=run_id)
+    mirror.sanitize(prompt)
+    mirror.sanitize("ask()")
+    expected = mirror.sanitize(output)
+
+    with get_session() as session:
+        step = (
+            session.execute(
+                select(Step).where(Step.run_id == run_id, Step.step_index == 0)
+            )
+            .scalars()
+            .one()
+        )
+        assert step.output == expected

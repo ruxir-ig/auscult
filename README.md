@@ -20,10 +20,14 @@ leaking patient data.
   realistic synthetic values.
 - Replacements are consistent within a run: the same real value always maps to
   the same fake value, so traces stay coherent for replay and debugging.
-- Each `Run` / `Step` stores a `redaction_count` so you can monitor detection
-  volume and spot drift as agent output patterns change.
+- Each `Run` / `Step` stores a `redaction_count` and `entity_counts` (entity
+  type → count, no raw spans) so you can monitor detection volume and mix.
 - JSON-shaped payloads are sanitized leaf-by-leaf so Faker replacements cannot
   corrupt object structure used later in replay comparisons.
+- Faker is seeded from the run id, so re-capturing the same raw input with the
+  same `run_id` yields identical synthetic replacements.
+- Optional `background=True` moves sanitize + DB I/O onto a worker thread so
+  the agent hot path stays passive; a full queue or worker error fails closed.
 
 > **Caveat:** sanitization is detection-based. Anything Presidio and the custom
 > recognizers miss is stored as-is. Treat the database as sensitive until you
@@ -92,6 +96,14 @@ from auscult.capture import AuscultTracer
 tracer = AuscultTracer(agent_type="triage-agent", initial_prompt=prompt)
 tracer.record_step(llm_command=command, output=output, error_message=error)
 tracer.finish()
+
+# Non-blocking capture for high-frequency agents (sanitize+DB on a worker):
+with AuscultTracer(
+    agent_type="triage-agent",
+    initial_prompt=prompt,
+    background=True,
+) as tracer:
+    tracer.record_step(llm_command=command, output=output)
 ```
 
 Inspect traces from the CLI:
@@ -104,9 +116,21 @@ uv run auscult steps <id>
 uv run auscult replay <id>
 uv run auscult compare <id> --handler mypkg.handlers:my_agent_handler
 uv run auscult stats
+uv run auscult export <id> --format jsonl -o run.jsonl
+uv run auscult purge --before 2026-01-01 --dry-run
 uv run auscult --json runs --limit 10    # machine-readable output for scripting
 ```
 
+See [ROADMAP.md](ROADMAP.md) for planned follow-ups (PHI eval harness, dual-pass
+NER, optional small-model packaging, DB indexes).
+
+### Scale note (indexes)
+
+At low volume, unindexed filters are fine. Once `auscult runs --since` or
+`stats` scans large tables, add indexes via Alembic — tracked on the roadmap:
+
+- `runs(agent_type, started_at)`, `runs(status, started_at)`
+- unique `(run_id, step_index)` on `steps`
 Replay a run in Python (for QA or regression checks):
 
 ```python
