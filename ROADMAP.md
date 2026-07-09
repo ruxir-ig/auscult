@@ -18,8 +18,13 @@ Prioritized follow-ups. Items marked **done** shipped; the rest are next.
 - [x] Optional small spaCy model packaging (`sm` / `trf` extras; `sm` in dev group)
 - [x] DB indexes: `runs(agent_type, started_at)`, `runs(status, started_at)`,
       unique `(run_id, step_index)` on `steps`
+- [x] Pluggable capture: ambient run context (`start_run` / `@observe_run`),
+      OpenAI/Anthropic client wrappers, LangChain/LangGraph callback handler
 
 ## Later / ideas
+
+- More framework adapters: CrewAI, AutoGen, LlamaIndex, OpenAI Agents SDK
+- OpenTelemetry span exporter so Auscult runs appear in existing APM traces
 
 - Sample-and-audit UI for false-negative review
 - Per-tenant allow/deny list config files

@@ -21,6 +21,9 @@ sm = [
 trf = [
 	"en-core-web-trf",
 ]
+langchain = [
+	"langchain-core>=0.3",
+]
 
 [project.scripts]
 auscult = "auscult.cli:main"
@@ -47,6 +50,8 @@ dev = [
     "mypy>=1.18.0",
     # Fast spaCy model for CI/tests; production default remains en-core-web-lg.
     "en-core-web-sm",
+    # Exercised by tests/test_integrations_langchain.py.
+    "langchain-core>=0.3",
 ]
 
 [tool.ruff]

@@ -105,6 +105,10 @@ class AuscultTracer:
             self._session.add(self._run)
             self._session.commit()
 
+    @property
+    def finished(self) -> bool:
+        return self._finished
+
     def _ensure_active(self) -> None:
         if self._finished:
             raise RuntimeError("Cannot use AuscultTracer after finish()")
