@@ -1,3 +1,5 @@
+import json
+
 from auscult.sanitizer import Sanitizer
 
 
@@ -136,3 +138,64 @@ def test_clinical_free_text_strips_all_phi() -> None:
         assert phi not in result
     # Clinical content should survive.
     assert "dyspnea" in result
+
+
+def test_clinical_allowlist_keeps_disease_eponyms() -> None:
+    text = "Differential includes Parkinson's disease and Addison's disease."
+    result = Sanitizer().sanitize(text)
+    assert "Parkinson" in result
+    assert "Addison" in result
+
+
+def test_denylist_redacts_badge_and_case_ids() -> None:
+    sanitizer = Sanitizer()
+    badge = sanitizer.sanitize("Assigned nurse BADGE:A12B34 on floor 3.")
+    case = sanitizer.sanitize("Opened CASE#99887766 for follow-up.")
+    assert "A12B34" not in badge
+    assert "99887766" not in case
+
+
+def test_score_threshold_is_honored() -> None:
+    # Extremely high threshold should suppress low-confidence hits and leave
+    # plain clinical text alone; PHI with strong pattern scores may still go.
+    high = Sanitizer(score_threshold=0.99)
+    assert "CBC" in (high.sanitize("Order a CBC panel.") or "")
+
+
+def test_json_payload_preserves_structure() -> None:
+    payload = {
+        "tool": "notify_patient",
+        "args": {
+            "name": "John Smith",
+            "phone": "212-555-0182",
+            "address": "1428 Elm Street",
+            "note": "Order CBC",
+        },
+    }
+    raw = json.dumps(payload)
+    result = Sanitizer().sanitize_with_stats(raw)
+    assert result.text is not None
+    parsed = json.loads(result.text)
+    assert parsed["tool"] == "notify_patient"
+    assert parsed["args"]["note"] == "Order CBC"
+    assert "John Smith" not in parsed["args"]["name"]
+    assert "212-555-0182" not in parsed["args"]["phone"]
+    assert "1428 Elm Street" not in parsed["args"]["address"]
+    assert result.redaction_count >= 1
+
+
+def test_sanitize_with_stats_counts_redactions() -> None:
+    result = Sanitizer().sanitize_with_stats(
+        "Call John Smith at 212-555-0182 about the CBC."
+    )
+    assert result.text is not None
+    assert "John Smith" not in result.text
+    assert result.redaction_count >= 1
+
+
+def test_custom_denylist_patterns() -> None:
+    sanitizer = Sanitizer(
+        denylist_patterns=[("site_code", r"\bSITE-[A-Z]{3}\d{3}\b", 0.95)]
+    )
+    result = sanitizer.sanitize("Route specimen to SITE-NYC001 today.")
+    assert "SITE-NYC001" not in result

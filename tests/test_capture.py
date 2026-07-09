@@ -138,3 +138,59 @@ def test_tracer_marks_run_failed_at_first_error(db) -> None:
         run = session.get(Run, tracer.run_id)
         assert run.status == "failed"
         assert run.failed_step == 1
+
+
+def test_tracer_records_redaction_counts(db) -> None:
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Triage John Smith.",
+    )
+    tracer.record_step(
+        llm_command="lookup_patient('John Smith')",
+        output="Phone: 212-555-0182.",
+    )
+    tracer.finish()
+
+    with get_session() as session:
+        run = session.get(Run, tracer.run_id)
+        step = (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .one()
+        )
+        assert run.redaction_count >= 1
+        assert step.redaction_count >= 1
+        assert run.redaction_count >= step.redaction_count
+
+
+def test_tracer_fail_closed_on_sanitizer_error(db) -> None:
+    """If sanitize raises, the step must not be written."""
+
+    class BoomSanitizer:
+        def sanitize_with_stats(self, text):
+            if text and "boom" in text:
+                raise RuntimeError("sanitizer exploded")
+            from auscult.sanitizer import SanitizeResult
+
+            return SanitizeResult(text=text, redaction_count=0)
+
+    tracer = AuscultTracer(
+        agent_type="test-agent",
+        initial_prompt="Check vitals.",
+        sanitizer=BoomSanitizer(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(RuntimeError, match="sanitizer exploded"):
+        tracer.record_step(llm_command="do_boom()", output="ok")
+
+    with get_session() as session:
+        steps = (
+            session.execute(select(Step).where(Step.run_id == tracer.run_id))
+            .scalars()
+            .all()
+        )
+        assert steps == []
+        run = session.get(Run, tracer.run_id)
+        assert run is not None
+        assert run.total_steps == 0
+
+    tracer.finish(crashed=True)

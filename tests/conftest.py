@@ -1,16 +1,19 @@
 import os
 import tempfile
 
-# Must be set before the engine is first created.
+# Must be set before the engine / sanitizer are first created.
 os.environ.setdefault(
     "DATABASE_URL", f"sqlite:///{tempfile.mkdtemp(prefix='auscult-tests-')}/test.sqlite"
 )
+# Prefer the small spaCy model in tests for speed; production default is lg.
+os.environ.setdefault("AUSCULT_SPACY_MODEL", "en_core_web_sm")
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from auscult.db import get_engine, reset_connection_state
 from auscult.models import Base
+from auscult.sanitizer import reset_analyzer_cache
 
 
 @pytest.fixture()
@@ -32,3 +35,10 @@ def migrated_db(monkeypatch: pytest.MonkeyPatch):
     command.upgrade(Config("alembic.ini"), "head")
     yield
     reset_connection_state()
+
+
+@pytest.fixture(autouse=True)
+def _reset_sanitizer_cache():
+    reset_analyzer_cache()
+    yield
+    reset_analyzer_cache()

@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -22,6 +23,7 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String, default="running")
     failed_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_steps: Mapped[int] = mapped_column(Integer, default=0)
+    redaction_count: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -38,5 +40,6 @@ class Step(Base):
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     time_for_completion: Mapped[float | None] = mapped_column(nullable=True)
+    redaction_count: Mapped[int] = mapped_column(Integer, default=0)
 
     run: Mapped["Run"] = relationship("Run", back_populates="steps")

@@ -10,6 +10,7 @@ dependencies = [
 	"presidio-analyzer",
 	"presidio-anonymizer",
 	"faker",
+	"en-core-web-lg",
 	"en-core-web-sm",
 	"alembic>=1.18.4",
 ]
@@ -26,8 +27,38 @@ packages = ["src/auscult"]
 
 [tool.uv.sources]
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+en-core-web-lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.14.0",
+    "mypy>=1.18.0",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["auscult"]
+mypy_path = "src"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "presidio_analyzer.*",
+    "presidio_anonymizer.*",
+    "faker.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
