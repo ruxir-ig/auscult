@@ -16,9 +16,10 @@ from sqlalchemy import select
 from .db import get_session
 from .eval import evaluate, format_report
 from .export import export_run, purge_runs_before
+from .migrate import upgrade_head
 from .models import Run, Step
 from .replay import RunNotFoundError, RunReplayer, format_playback
-from .sanitizer import Sanitizer
+from .sanitizer import DEFAULT_SPACY_MODEL, Sanitizer
 
 
 def _print_run(run: Run) -> None:
@@ -412,6 +413,28 @@ def _cmd_purge(
         print(f"  {run_id}")
 
 
+def _cmd_migrate(*, as_json: bool) -> None:
+    upgrade_head()
+    if as_json:
+        _emit_json({"status": "ok", "message": "Migrations applied."})
+    else:
+        print("Migrations applied.")
+
+
+def _cmd_setup(*, model: str, as_json: bool) -> None:
+    """Download a spaCy model (models are not published on PyPI)."""
+    try:
+        from spacy.cli.download import download as spacy_download
+    except ImportError as exc:  # pragma: no cover - spacy is a hard dep
+        raise SystemExit(f"spaCy is required to download models: {exc}") from exc
+
+    spacy_download(model)
+    if as_json:
+        _emit_json({"status": "ok", "model": model})
+    else:
+        print(f"Installed spaCy model {model!r}.")
+
+
 def _cmd_eval(
     *,
     corpus: str | None,
@@ -545,10 +568,25 @@ def main() -> None:
         help="List examples with false positives/negatives.",
     )
 
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Download the spaCy NLP model used for PHI detection.",
+    )
+    setup_parser.add_argument(
+        "--model",
+        default=DEFAULT_SPACY_MODEL,
+        help=f"spaCy model to download (default: {DEFAULT_SPACY_MODEL}).",
+    )
+
+    subparsers.add_parser(
+        "migrate",
+        help="Apply database migrations (creates runs/steps tables).",
+    )
+
     args = parser.parse_args()
     as_json = bool(args.json)
 
-    # eval does not need a database.
+    # Commands that do not need a database.
     if args.command == "eval":
         _cmd_eval(
             corpus=args.corpus,
@@ -559,6 +597,9 @@ def main() -> None:
             as_json=as_json,
         )
         return
+    if args.command == "setup":
+        _cmd_setup(model=args.model, as_json=as_json)
+        return
 
     if "DATABASE_URL" not in os.environ:
         print(
@@ -567,7 +608,9 @@ def main() -> None:
         )
         sys.exit(2)
 
-    if args.command == "runs":
+    if args.command == "migrate":
+        _cmd_migrate(as_json=as_json)
+    elif args.command == "runs":
         _cmd_runs(
             agent_type=args.agent_type,
             status=args.status,

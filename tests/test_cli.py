@@ -101,3 +101,30 @@ def test_cmd_runs_since_filter(db, capsys, monkeypatch) -> None:
     cli.main()
     payload = json.loads(capsys.readouterr().out)
     assert payload == []
+
+
+def test_cmd_migrate_json(capsys, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/auscult-migrate-test.sqlite")
+    called: list[bool] = []
+    monkeypatch.setattr(cli, "upgrade_head", lambda: called.append(True))
+    monkeypatch.setattr(sys, "argv", ["auscult", "--json", "migrate"])
+    cli.main()
+    assert called == [True]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+
+
+def test_cmd_setup_invokes_spacy_download(monkeypatch, capsys) -> None:
+    import importlib
+
+    calls: list[str] = []
+
+    def fake_download(model: str) -> None:
+        calls.append(model)
+
+    download_mod = importlib.import_module("spacy.cli.download")
+    monkeypatch.setattr(download_mod, "download", fake_download)
+    monkeypatch.setattr(sys, "argv", ["auscult", "setup", "--model", "en_core_web_sm"])
+    cli.main()
+    assert calls == ["en_core_web_sm"]
+    assert "en_core_web_sm" in capsys.readouterr().out

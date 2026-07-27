@@ -1,11 +1,42 @@
 # Auscult
 
-Passive observability and safe replay tool for healthcare AI agents.
+Python SDK and CLI for PHI-safe observability and replay of healthcare AI agents.
 
 Auscult records what an AI agent did (prompt, steps, outputs, errors), sanitizes
 all free text with PHI detection before anything touches the database, and makes
 the resulting synthetic traces inspectable for debugging, QA, and audit — without
 leaking patient data.
+
+## Install
+
+**With uv (recommended):**
+
+```bash
+uv add auscult
+uv run auscult setup                 # downloads en_core_web_lg (PHI NER)
+export DATABASE_URL=sqlite:////tmp/auscult.sqlite   # or Postgres
+uv run auscult migrate
+```
+
+**With pip:**
+
+```bash
+pip install auscult
+auscult setup
+export DATABASE_URL=sqlite:////tmp/auscult.sqlite
+auscult migrate
+```
+
+LangChain / LangGraph support is optional:
+
+```bash
+uv add 'auscult[langchain]'
+# or: pip install 'auscult[langchain]'
+```
+
+> **Note:** spaCy models are not on PyPI, so they are installed separately via
+> `auscult setup` (or `python -m spacy download en_core_web_lg`). PyPI rejects
+> packages that declare direct URL dependencies.
 
 ## How it works
 
@@ -36,59 +67,18 @@ leaking patient data.
 
 ## Requirements
 
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/) (all dependencies, including spaCy models,
-  are managed through uv — never use pip directly)
+- Python 3.12+
 - PostgreSQL (or SQLite for local experiments)
+- A spaCy English model (`auscult setup` installs `en_core_web_lg` by default)
 
-## Setup
+## Quickstart
 
 ```bash
-uv sync
-export DATABASE_URL=postgresql+psycopg2://user:pass@localhost/auscult
-# or, for a quick local run:
+uv add auscult
+uv run auscult setup
 export DATABASE_URL=sqlite:////tmp/auscult.sqlite
-uv run migrate.py
+uv run auscult migrate
 ```
-
-`migrate.py` applies Alembic migrations (`alembic upgrade head`). For schema
-changes after the initial release, autogenerate a new revision:
-
-```bash
-uv run alembic revision --autogenerate -m "describe your change"
-uv run alembic upgrade head
-```
-
-`DATABASE_URL` is read lazily for application code, and from the environment
-when running migrations, so `uv run auscult --help` works without it.
-
-### Sanitizer configuration
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `AUSCULT_SPACY_MODEL` | `en_core_web_lg` | Primary spaCy model for NER. Use `en_core_web_trf` for best PERSON/LOCATION recall, or `en_core_web_sm` for faster local/test loads (`uv sync --extra sm` or `--group dev`). |
-| `AUSCULT_SCORE_THRESHOLD` | `0.35` | Minimum Presidio confidence to redact. **Lower = more false positives redacted** (safer for PHI; may over-redact clinical eponyms that slip past the allow-list). |
-| `AUSCULT_DUAL_PASS_MODEL` | _(unset)_ | Optional second spaCy model (e.g. `en_core_web_trf`). When set, PERSON/LOCATION candidates from this model are merged with the primary pass for better recall without running the heavy model on every entity type. |
-
-Clinical disease eponyms (Parkinson, Addison, Crohn, …) are allow-listed so they
-are not treated as PERSON. Organization-specific patterns (e.g. `BADGE:…`,
-`CASE#…`) are deny-listed as `CUSTOM_IDENTIFIER`. Pass extra patterns via
-`Sanitizer(denylist_patterns=[...])`.
-
-### Production guidance (defense in depth)
-
-Even though the DB is meant to hold synthetic data:
-
-1. **TLS to Postgres** — use `sslmode=require` (or verify-full) in `DATABASE_URL`.
-2. **At-rest encryption** — enable volume encryption and/or column encryption for
-   the Auscult database; sanitized ≠ public.
-3. **Access control** — restrict who can `SELECT` from `runs` / `steps`; treat
-   traces as PHI-adjacent until audited.
-4. **Validate detection** — run `auscult eval` on the golden corpus after model /
-   threshold changes; watch `redaction_count` / `entity_counts` drift via
-   `auscult stats`.
-
-## Usage
 
 ### Plug into an existing agent (no loop rewrite)
 
@@ -113,7 +103,7 @@ Anthropic works the same way via
 `auscult.integrations.anthropic.wrap_anthropic(client)` (patches
 `messages.create`).
 
-For LangChain / LangGraph (install with `uv sync --extra langchain`), pass a
+For LangChain / LangGraph (install with `auscult[langchain]`), pass a
 callback handler at invocation — the standard pluggable observability
 mechanism for those frameworks:
 
@@ -122,7 +112,7 @@ from auscult.integrations.langchain import AuscultCallbackHandler
 
 handler = AuscultCallbackHandler(agent_type="triage-agent")
 result = graph.invoke(inputs, config={"callbacks": [handler]})
-print(handler.last_run_id)   # inspect with: uv run auscult run <id>
+print(handler.last_run_id)   # inspect with: auscult run <id>
 ```
 
 Each LLM call and tool call becomes one sanitized step; the run finishes when
@@ -165,21 +155,70 @@ with AuscultTracer(
 ### Inspect from the CLI
 
 ```bash
-uv run auscult runs
-uv run auscult runs --agent-type triage-agent --status failed --since 2026-07-01 --limit 50
-uv run auscult run <id>
-uv run auscult steps <id>
-uv run auscult replay <id>
-uv run auscult compare <id> --handler mypkg.handlers:my_agent_handler
-uv run auscult stats
-uv run auscult export <id> --format jsonl -o run.jsonl
-uv run auscult purge --before 2026-01-01 --dry-run
-uv run auscult eval --verbose
-uv run auscult eval --dual-pass-model en_core_web_trf
-uv run auscult --json runs --limit 10    # machine-readable output for scripting
+auscult runs
+auscult runs --agent-type triage-agent --status failed --since 2026-07-01 --limit 50
+auscult run <id>
+auscult steps <id>
+auscult replay <id>
+auscult compare <id> --handler mypkg.handlers:my_agent_handler
+auscult stats
+auscult export <id> --format jsonl -o run.jsonl
+auscult purge --before 2026-01-01 --dry-run
+auscult eval --verbose
+auscult eval --dual-pass-model en_core_web_trf
+auscult --json runs --limit 10    # machine-readable output for scripting
 ```
 
 See [ROADMAP.md](ROADMAP.md) for later ideas (audit UI, per-tenant lists, metrics).
+
+## Developing from source
+
+```bash
+git clone https://github.com/ruxir-ig/auscult.git
+cd auscult
+uv sync --group nlp          # package + en_core_web_lg via uv sources
+# or, for tests/CI (small model):
+uv sync --group dev
+export DATABASE_URL=sqlite:////tmp/auscult.sqlite
+uv run auscult migrate
+# equivalent: uv run migrate.py
+```
+
+Schema revisions (contributors):
+
+```bash
+uv run alembic revision --autogenerate -m "describe your change"
+uv run auscult migrate
+```
+
+`DATABASE_URL` is read lazily for application code, and from the environment
+when running migrations, so `auscult --help` works without it.
+
+### Sanitizer configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AUSCULT_SPACY_MODEL` | `en_core_web_lg` | Primary spaCy model for NER. Use `en_core_web_trf` for best PERSON/LOCATION recall, or `en_core_web_sm` for faster local/test loads (`auscult setup --model …`, or `uv sync --group dev` / `--group nlp-trf`). |
+| `AUSCULT_SCORE_THRESHOLD` | `0.35` | Minimum Presidio confidence to redact. **Lower = more false positives redacted** (safer for PHI; may over-redact clinical eponyms that slip past the allow-list). |
+| `AUSCULT_DUAL_PASS_MODEL` | _(unset)_ | Optional second spaCy model (e.g. `en_core_web_trf`). When set, PERSON/LOCATION candidates from this model are merged with the primary pass for better recall without running the heavy model on every entity type. |
+
+Clinical disease eponyms (Parkinson, Addison, Crohn, …) are allow-listed so they
+are not treated as PERSON. Organization-specific patterns (e.g. `BADGE:…`,
+`CASE#…`) are deny-listed as `CUSTOM_IDENTIFIER`. Pass extra patterns via
+`Sanitizer(denylist_patterns=[...])`.
+
+### Production guidance (defense in depth)
+
+Even though the DB is meant to hold synthetic data:
+
+1. **TLS to Postgres** — use `sslmode=require` (or verify-full) in `DATABASE_URL`.
+2. **At-rest encryption** — enable volume encryption and/or column encryption for
+   the Auscult database; sanitized ≠ public.
+3. **Access control** — restrict who can `SELECT` from `runs` / `steps`; treat
+   traces as PHI-adjacent until audited.
+4. **Validate detection** — run `auscult eval` on the golden corpus after model /
+   threshold changes; watch `redaction_count` / `entity_counts` drift via
+   `auscult stats`.
 
 ### Indexes
 
@@ -209,7 +248,7 @@ assert result.all_matched
 ## Tests
 
 ```bash
-uv sync --group dev --extra sm
+uv sync --group dev
 AUSCULT_SPACY_MODEL=en_core_web_sm uv run pytest
 uv run auscult eval --nlp-model en_core_web_sm
 uv run ruff check src tests
@@ -233,13 +272,22 @@ reaches the database.
 
 ## Packaging note
 
-Production default dependency is `en_core_web_lg` only. Optional extras:
+spaCy models are **not** declared as package dependencies (PyPI forbids direct
+URL requirements). After `pip` / `uv` install:
 
-- `uv sync --extra sm` — `en_core_web_sm` for fast local/CI loads
-- `uv sync --extra trf` — `en_core_web_trf` for dual-pass / best PERSON recall
-- `uv sync --extra langchain` — `langchain-core` for the LangChain/LangGraph
-  callback handler (the OpenAI/Anthropic wrappers are duck-typed and need no extra)
-- `uv sync --group dev` — includes `sm` and `langchain-core` for tests
+```bash
+auscult setup                              # en_core_web_lg
+auscult setup --model en_core_web_sm       # smaller / faster
+auscult setup --model en_core_web_trf      # best PERSON recall
+```
 
-spaCy models are installed from wheel URLs in `[tool.uv.sources]`. Outside uv
-(plain pip), install models yourself, e.g. `python -m spacy download en_core_web_lg`.
+From a source checkout, uv can pull model wheels via `[tool.uv.sources]`:
+
+- `uv sync --group nlp` — `en_core_web_lg`
+- `uv sync --group nlp-trf` — `en_core_web_trf`
+- `uv sync --group dev` — `en_core_web_sm` + test tools + `langchain-core`
+
+Optional PyPI extra:
+
+- `auscult[langchain]` — `langchain-core` for the LangChain/LangGraph callback
+  handler (OpenAI/Anthropic wrappers are duck-typed and need no extra)
