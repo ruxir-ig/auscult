@@ -27,7 +27,7 @@ Passive observability and safe replay tool for healthcare AI agents.
 - Run tasks with uv run, not python directly
 
 ## Running the project
-- uv sync to install dependencies
-- uv run migrate.py to apply Alembic migrations
+- uv sync --group nlp (or --group dev for tests) to install dependencies
+- uv run auscult migrate (or uv run migrate.py) to apply Alembic migrations
 - uv run alembic revision --autogenerate -m "message" to create schema revisions
 - uv run auscult to use the CLI

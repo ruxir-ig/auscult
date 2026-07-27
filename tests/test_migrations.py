@@ -2,10 +2,10 @@ import tempfile
 
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy import inspect
 
 from auscult.db import get_engine, reset_connection_state
+from auscult.migrate import get_alembic_config, upgrade_head
 
 
 @pytest.fixture()
@@ -16,8 +16,7 @@ def migration_db(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_migrations_apply_from_empty_db(migration_db: None) -> None:
-    cfg = Config("alembic.ini")
-    command.upgrade(cfg, "head")
+    upgrade_head()
 
     inspector = inspect(get_engine())
     tables = set(inspector.get_table_names())
@@ -38,7 +37,7 @@ def test_migrations_apply_from_empty_db(migration_db: None) -> None:
 
 
 def test_migrations_are_reversible(migration_db: None) -> None:
-    cfg = Config("alembic.ini")
+    cfg = get_alembic_config()
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "base")
 

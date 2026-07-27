@@ -98,23 +98,17 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
-    { name = "en-core-web-lg" },
     { name = "faker" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
     { name = "psycopg2-binary" },
+    { name = "spacy" },
     { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
 langchain = [
     { name = "langchain-core" },
-]
-sm = [
-    { name = "en-core-web-sm" },
-]
-trf = [
-    { name = "en-core-web-trf" },
 ]
 
 [package.dev-dependencies]
@@ -125,21 +119,25 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+nlp = [
+    { name = "en-core-web-lg" },
+]
+nlp-trf = [
+    { name = "en-core-web-trf" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.18.4" },
-    { name = "en-core-web-lg", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" },
-    { name = "en-core-web-sm", marker = "extra == 'sm'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
-    { name = "en-core-web-trf", marker = "extra == 'trf'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" },
     { name = "faker" },
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=0.3" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
     { name = "psycopg2-binary" },
+    { name = "spacy", specifier = ">=3.8,<4" },
     { name = "sqlalchemy", specifier = ">=2.0" },
 ]
-provides-extras = ["sm", "trf", "langchain"]
+provides-extras = ["langchain"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -149,6 +147,8 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "ruff", specifier = ">=0.14.0" },
 ]
+nlp = [{ name = "en-core-web-lg", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }]
+nlp-trf = [{ name = "en-core-web-trf", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl" }]
 
 [[package]]
 name = "blis"

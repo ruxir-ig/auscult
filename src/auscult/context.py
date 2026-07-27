@@ -14,7 +14,7 @@ propagate into ``ThreadPoolExecutor`` / ``ProcessPoolExecutor`` workers
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
@@ -69,7 +69,7 @@ def record_step(
 
 
 @contextmanager
-def use_tracer(tracer: AuscultTracer) -> Iterator[AuscultTracer]:
+def use_tracer(tracer: AuscultTracer) -> Generator[AuscultTracer]:
     """Activate an existing tracer for the duration of the block.
 
     Does not finish the tracer on exit; the caller owns its lifecycle.
@@ -86,7 +86,7 @@ def start_run(
     agent_type: str,
     initial_prompt: str,
     **tracer_kwargs: Any,
-) -> Iterator[AuscultTracer]:
+) -> Generator[AuscultTracer]:
     """Create a tracer, activate it, and finish it when the block exits.
 
     An exception escaping the block marks the run as crashed and re-raises.

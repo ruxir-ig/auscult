@@ -20,6 +20,8 @@ Prioritized follow-ups. Items marked **done** shipped; the rest are next.
       unique `(run_id, step_index)` on `steps`
 - [x] Pluggable capture: ambient run context (`start_run` / `@observe_run`),
       OpenAI/Anthropic client wrappers, LangChain/LangGraph callback handler
+- [x] PyPI-ready packaging: MIT license, metadata, `auscult setup` / `auscult migrate`,
+      spaCy models via post-install (not direct URL deps), Trusted Publishing workflow
 
 ## Later / ideas
 

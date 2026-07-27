@@ -25,8 +25,8 @@ Tracer resolution order per root run:
 host application instead of being swallowed (fail-closed, nothing unsanitized
 is ever stored).
 
-Requires ``langchain-core`` (install the ``langchain`` extra:
-``uv sync --extra langchain``).
+Requires ``langchain-core`` (install with ``pip install 'auscult[langchain]'``
+or ``uv add auscult --extra langchain``).
 """
 
 from __future__ import annotations
@@ -44,7 +44,8 @@ try:
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
     raise ImportError(
         "auscult.integrations.langchain requires langchain-core; "
-        "install it with `uv sync --extra langchain` (or add langchain-core)."
+        "install it with `pip install 'auscult[langchain]'` "
+        "or `uv add auscult --extra langchain`."
     ) from exc
 
 if TYPE_CHECKING:

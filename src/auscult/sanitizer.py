@@ -8,7 +8,8 @@ Configuration (environment variables):
   AUSCULT_SPACY_MODEL   spaCy model name (default: en_core_web_lg).
                         Use en_core_web_trf for best PERSON/LOCATION recall,
                         or en_core_web_sm for faster local/dev loads
-                        (install the ``sm`` extra / ``--group dev``).
+                        (``auscult setup --model en_core_web_sm``, or
+                        ``uv sync --group dev`` from a source checkout).
   AUSCULT_SCORE_THRESHOLD
                         Minimum Presidio confidence to redact (default: 0.35).
                         Lower = more false positives redacted (safer for PHI).
@@ -49,8 +50,7 @@ ENTITY_TYPES: list[str] = [
     "CUSTOM_IDENTIFIER",
 ]
 
-# Production default favors recall over load time. Override with
-# AUSCULT_SPACY_MODEL=en_core_web_sm for fast local/test runs (optional extra).
+# AUSCULT_SPACY_MODEL=en_core_web_sm for fast local/test runs.
 DEFAULT_SPACY_MODEL = "en_core_web_lg"
 
 # Lower threshold = more redaction (safer for PHI, more false positives).
@@ -236,6 +236,17 @@ def _normalize_allowlist(terms: frozenset[str] | set[str] | list[str]) -> frozen
     return frozenset(t.strip().lower() for t in terms if t and t.strip())
 
 
+def _missing_model_message(model_name: str) -> str:
+    return (
+        f"spaCy model {model_name!r} is not installed. "
+        f"Install it with: auscult setup --model {model_name}\n"
+        f"  (or: python -m spacy download {model_name})\n"
+        "From a source checkout with uv you can also run: "
+        "uv sync --group nlp   # en_core_web_lg\n"
+        "  uv sync --group dev   # en_core_web_sm for tests"
+    )
+
+
 @lru_cache(maxsize=4)
 def _analyzer(model_name: str) -> AnalyzerEngine:
     """Build a Presidio analyzer for the given spaCy model (cached)."""
@@ -245,8 +256,12 @@ def _analyzer(model_name: str) -> AnalyzerEngine:
             "models": [{"lang_code": "en", "model_name": model_name}],
         }
     )
+    try:
+        nlp_engine = provider.create_engine()
+    except (OSError, ImportError, ValueError) as exc:
+        raise RuntimeError(_missing_model_message(model_name)) from exc
     analyzer = AnalyzerEngine(
-        nlp_engine=provider.create_engine(),
+        nlp_engine=nlp_engine,
         supported_languages=["en"],
     )
     for recognizer in _CUSTOM_RECOGNIZERS:

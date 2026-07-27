@@ -1,11 +1,6 @@
-from alembic import command
-from alembic.config import Config
+"""Repo-root wrapper; prefer ``auscult migrate`` after installing the package."""
 
-
-def main() -> None:
-    command.upgrade(Config("alembic.ini"), "head")
-    print("Migrations applied.")
-
+from auscult.migrate import main
 
 if __name__ == "__main__":
     main()
