@@ -20,6 +20,7 @@ def test_export_run_json_and_jsonl(db) -> None:
     assert as_json["id"] == tracer.run_id
     assert as_json["agent_type"] == "export-agent"
     assert len(as_json["steps"]) == 1
+    assert as_json["steps"][0]["run_id"] == tracer.run_id
     assert "entity_counts" in as_json
 
     lines = export_run(tracer.run_id, fmt="jsonl").strip().splitlines()

@@ -6,10 +6,11 @@ re-exposes raw PHI — it only reads what capture stored.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .db import get_session
 from .models import Run, Step
@@ -72,38 +73,37 @@ class ReplayResult:
         return all(step.matched for step in self.steps)
 
 
+def fetch_run(session: Session, run_id: str) -> tuple[Run, list[Step]]:
+    """Return a run and its steps in order, or raise :class:`RunNotFoundError`."""
+    run = session.get(Run, run_id)
+    if run is None:
+        raise RunNotFoundError(run_id)
+    steps = session.scalars(
+        select(Step).where(Step.run_id == run_id).order_by(Step.step_index)
+    )
+    return run, list(steps)
+
+
 def load_run(run_id: str) -> ReplayRun:
     with get_session() as session:
-        run = session.get(Run, run_id)
-        if run is None:
-            raise RunNotFoundError(run_id)
-
-        steps = (
-            session.execute(
-                select(Step).where(Step.run_id == run_id).order_by(Step.step_index)
-            )
-            .scalars()
-            .all()
+        run, steps = fetch_run(session, run_id)
+        return ReplayRun(
+            run_id=run.id,
+            agent_type=run.agent_type,
+            initial_prompt=run.initial_prompt,
+            status=run.status,
+            failed_step=run.failed_step,
+            steps=tuple(
+                ReplayStep(
+                    step_index=step.step_index,
+                    llm_command=step.llm_command,
+                    output=step.output,
+                    error_message=step.error_message,
+                    time_for_completion=step.time_for_completion,
+                )
+                for step in steps
+            ),
         )
-
-    return ReplayRun(
-        run_id=run.id,
-        agent_type=run.agent_type,
-        initial_prompt=run.initial_prompt,
-        status=run.status,
-        failed_step=run.failed_step,
-        steps=tuple(_to_replay_step(step) for step in steps),
-    )
-
-
-def _to_replay_step(step: Step) -> ReplayStep:
-    return ReplayStep(
-        step_index=step.step_index,
-        llm_command=step.llm_command,
-        output=step.output,
-        error_message=step.error_message,
-        time_for_completion=step.time_for_completion,
-    )
 
 
 class RunReplayer:
@@ -125,29 +125,30 @@ class RunReplayer:
         handler: Callable[[str], tuple[str | None, str | None]],
     ) -> ReplayResult:
         """Invoke handler for each step and compare results to the recording."""
-        comparisons = tuple(
-            StepComparison(
-                step_index=step.step_index,
-                llm_command=step.llm_command,
-                expected_output=step.output,
-                actual_output=actual_output,
-                expected_error=step.error_message,
-                actual_error=actual_error,
+        comparisons = []
+        for step in self.run.steps:
+            actual_output, actual_error = handler(step.llm_command)
+            comparisons.append(
+                StepComparison(
+                    step_index=step.step_index,
+                    llm_command=step.llm_command,
+                    expected_output=step.output,
+                    actual_output=actual_output,
+                    expected_error=step.error_message,
+                    actual_error=actual_error,
+                )
             )
-            for step in self.run.steps
-            for actual_output, actual_error in (handler(step.llm_command),)
-        )
-        return ReplayResult(run_id=self.run.run_id, steps=comparisons)
+        return ReplayResult(run_id=self.run.run_id, steps=tuple(comparisons))
 
 
-def format_playback(run: ReplayRun, steps: Iterable[ReplayStep] | None = None) -> str:
+def format_playback(run: ReplayRun) -> str:
     """Format a run as human-readable playback output."""
     lines = [
         f"Replaying run {run.run_id} ({run.agent_type}, {run.status})",
         f"initial_prompt: {run.initial_prompt}",
         "",
     ]
-    for step in steps if steps is not None else run.steps:
+    for step in run.steps:
         lines.append(f"step {step.step_index}: {step.llm_command}")
         if step.error_message is not None:
             lines.append(f"  ! {step.error_message}")

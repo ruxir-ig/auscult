@@ -19,14 +19,11 @@ failed steps and re-raised. Streaming calls record ``output=None``.
 
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 from ..capture import AuscultTracer
-from ..context import require_tracer
+from ._patch import patch_create
 from ._serialize import to_text
-
-_WRAPPED_MARKER = "_auscult_wrapped"
 
 
 def wrap_anthropic[ClientT](client: ClientT, *, tracer: AuscultTracer | None = None) -> ClientT:
@@ -37,55 +34,20 @@ def wrap_anthropic[ClientT](client: ClientT, *, tracer: AuscultTracer | None = N
             "wrap_anthropic: client has no messages.create; "
             "is this an Anthropic-style client?"
         )
-
-    original = messages.create
-    if getattr(original, _WRAPPED_MARKER, False):
-        return client
-
-    def resolve_tracer() -> AuscultTracer:
-        return tracer if tracer is not None else require_tracer()
-
-    if inspect.iscoroutinefunction(original):
-
-        async def async_create(*args: Any, **kwargs: Any) -> Any:
-            active = resolve_tracer()
-            command = _format_command(kwargs)
-            try:
-                response = await original(*args, **kwargs)
-            except Exception as exc:
-                active.record_step(command, output=None, error_message=str(exc))
-                raise
-            active.record_step(command, output=_extract_output(kwargs, response))
-            return response
-
-        setattr(async_create, _WRAPPED_MARKER, True)
-        messages.create = async_create
-        return client
-
-    def create(*args: Any, **kwargs: Any) -> Any:
-        active = resolve_tracer()
-        command = _format_command(kwargs)
-        try:
-            response = original(*args, **kwargs)
-        except Exception as exc:
-            active.record_step(command, output=None, error_message=str(exc))
-            raise
-        active.record_step(command, output=_extract_output(kwargs, response))
-        return response
-
-    setattr(create, _WRAPPED_MARKER, True)
-    messages.create = create
+    patch_create(
+        messages,
+        tracer=tracer,
+        format_command=_format_command,
+        extract_output=_extract_output,
+    )
     return client
 
 
 def _format_command(kwargs: dict[str, Any]) -> str:
     payload: dict[str, Any] = {"api": "messages"}
-    if "model" in kwargs:
-        payload["model"] = kwargs["model"]
-    if "system" in kwargs:
-        payload["system"] = kwargs["system"]
-    if "messages" in kwargs:
-        payload["messages"] = kwargs["messages"]
+    for key in ("model", "system", "messages"):
+        if key in kwargs:
+            payload[key] = kwargs[key]
     return to_text(payload)
 
 
