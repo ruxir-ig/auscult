@@ -70,7 +70,6 @@ include = [
 	"/README.md",
 	"/LICENSE",
 	"/alembic.ini",
-	"/migrate.py",
 	"/pyproject.toml",
 ]
 

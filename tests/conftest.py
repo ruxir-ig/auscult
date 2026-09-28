@@ -9,10 +9,9 @@ os.environ.setdefault(
 os.environ.setdefault("AUSCULT_SPACY_MODEL", "en_core_web_sm")
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from auscult.db import get_engine, reset_connection_state
+from auscult.migrate import upgrade_head
 from auscult.models import Base
 from auscult.sanitizer import reset_analyzer_cache
 
@@ -33,7 +32,7 @@ def migrated_db(monkeypatch: pytest.MonkeyPatch):
     db_dir = tempfile.mkdtemp(prefix="auscult-integration-")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_dir}/test.sqlite")
     reset_connection_state()
-    command.upgrade(Config("alembic.ini"), "head")
+    upgrade_head()
     yield
     reset_connection_state()
 

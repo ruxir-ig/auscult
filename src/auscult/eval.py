@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
-from importlib import resources
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from .sanitizer import Sanitizer
 
-DEFAULT_CORPUS_RESOURCE = "auscult.data.phi_eval_corpus.jsonl"
+DEFAULT_CORPUS_PATH = Path(__file__).resolve().parent / "data" / "phi_eval_corpus.jsonl"
 
 
 @dataclass(frozen=True)
@@ -43,8 +42,8 @@ class ExampleScore:
     true_positives: int
     false_positives: int
     false_negatives: int
-    predicted: list[LabeledSpan] = field(default_factory=list)
-    expected: list[LabeledSpan] = field(default_factory=list)
+    predicted: list[LabeledSpan]
+    expected: list[LabeledSpan]
 
 
 @dataclass
@@ -84,38 +83,16 @@ class EvalReport:
                     "true_positives": ex.true_positives,
                     "false_positives": ex.false_positives,
                     "false_negatives": ex.false_negatives,
-                    "predicted": [
-                        {"entity_type": s.entity_type, "start": s.start, "end": s.end}
-                        for s in ex.predicted
-                    ],
-                    "expected": [
-                        {"entity_type": s.entity_type, "start": s.start, "end": s.end}
-                        for s in ex.expected
-                    ],
+                    "predicted": [asdict(s) for s in ex.predicted],
+                    "expected": [asdict(s) for s in ex.expected],
                 }
                 for ex in self.examples
             ],
         }
 
 
-def _default_corpus_path() -> Path:
-    # Prefer importlib.resources so installed wheels work; fall back to source tree.
-    try:
-        root = resources.files("auscult") / "data" / "phi_eval_corpus.jsonl"
-        if root.is_file():
-            return Path(str(root))
-    except (TypeError, FileNotFoundError, ModuleNotFoundError):
-        pass
-    here = Path(__file__).resolve().parent / "data" / "phi_eval_corpus.jsonl"
-    if here.is_file():
-        return here
-    raise FileNotFoundError(
-        "phi_eval_corpus.jsonl not found; pass --corpus explicitly"
-    )
-
-
 def load_corpus(path: Path | str | None = None) -> list[EvalExample]:
-    corpus_path = Path(path) if path is not None else _default_corpus_path()
+    corpus_path = Path(path) if path is not None else DEFAULT_CORPUS_PATH
     examples: list[EvalExample] = []
     with corpus_path.open(encoding="utf-8") as fh:
         for line_no, line in enumerate(fh, start=1):

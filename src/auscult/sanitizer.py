@@ -327,11 +327,9 @@ class Sanitizer:
         if self._dual_pass_model == self._nlp_model:
             # Same model twice is wasted work; treat as single-pass.
             self._dual_pass_model = None
-        self.total_redactions: int = 0
-        self.entity_counts: Counter[str] = Counter()
 
     def sanitize(self, text: str | None) -> str | None:
-        """Sanitize text; returns only the sanitized string (API-compatible)."""
+        """Sanitize text and return only the sanitized string."""
         return self.sanitize_with_stats(text).text
 
     def sanitize_with_stats(self, text: str | None) -> SanitizeResult:
@@ -340,13 +338,18 @@ class Sanitizer:
 
         # Structured JSON payloads: walk string leaves so Faker commas/quotes
         # cannot corrupt object structure used later in replay comparisons.
-        if self._looks_like_json(text):
-            return self._sanitize_json(text)
+        if text.lstrip()[:1] in ("{", "["):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+            else:
+                return self._sanitize_json(payload)
 
         return self._sanitize_plain(text)
 
     def _sanitize_plain(self, text: str) -> SanitizeResult:
-        results = self._analyze(text)
+        results = self.analyze(text)
         if not results:
             return SanitizeResult(text=text, redaction_count=0, entity_counts={})
 
@@ -361,22 +364,13 @@ class Sanitizer:
             analyzer_results=results,  # type: ignore[arg-type]
             operators=operators,
         ).text
-        counts: Counter[str] = Counter(r.entity_type for r in results)
-        count = len(results)
-        self.total_redactions += count
-        self.entity_counts.update(counts)
         return SanitizeResult(
             text=anonymized,
-            redaction_count=count,
-            entity_counts=dict(counts),
+            redaction_count=len(results),
+            entity_counts=dict(Counter(r.entity_type for r in results)),
         )
 
-    def _sanitize_json(self, text: str) -> SanitizeResult:
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            return self._sanitize_plain(text)
-
+    def _sanitize_json(self, payload: object) -> SanitizeResult:
         total = 0
         merged: Counter[str] = Counter()
 
@@ -401,22 +395,8 @@ class Sanitizer:
             entity_counts=dict(merged),
         )
 
-    @staticmethod
-    def _looks_like_json(text: str) -> bool:
-        stripped = text.lstrip()
-        if not stripped or stripped[0] not in "{[":
-            return False
-        try:
-            json.loads(text)
-        except json.JSONDecodeError:
-            return False
-        return True
-
     def analyze(self, text: str) -> list[RecognizerResult]:
         """Return Presidio analyzer results after allow/deny / dual-pass filtering."""
-        return self._analyze(text)
-
-    def _analyze(self, text: str) -> list[RecognizerResult]:
         analyzer = _analyzer(self._nlp_model)
         results = list(
             analyzer.analyze(
@@ -426,11 +406,10 @@ class Sanitizer:
                 score_threshold=self._score_threshold,
             )
         )
-        if self._dual_pass_model:
-            results.extend(self._dual_pass_results(text))
-            results = self._dedupe_results(results)
-        if self._extra_denylist:
-            results = list(results) + self._analyze_extra_denylist(text)
+        if self._dual_pass_model or self._extra_denylist:
+            if self._dual_pass_model:
+                results.extend(self._dual_pass_results(text))
+            results.extend(self._analyze_extra_denylist(text))
             results = self._dedupe_results(results)
 
         return self._apply_allowlist(text, results)
@@ -488,7 +467,7 @@ class Sanitizer:
             # Drop if the whole span or any token is an allowlisted clinical term.
             tokens = {span} | set(re.split(r"[\s\-']+", span))
             tokens.discard("")
-            if tokens & self._allowlist or span in self._allowlist:
+            if tokens & self._allowlist:
                 continue
             filtered.append(result)
         return filtered

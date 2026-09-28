@@ -1,8 +1,8 @@
 """Apply packaged Alembic migrations.
 
 End users run ``auscult migrate`` (or ``python -m auscult.migrate``) after
-installing from PyPI / uv. Contributors can still use the repo-root
-``migrate.py`` / ``alembic.ini`` wrappers.
+installing from PyPI / uv. Contributors creating new revisions use the
+repo-root ``alembic.ini`` with ``uv run alembic``.
 """
 
 from __future__ import annotations

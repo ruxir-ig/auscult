@@ -25,14 +25,12 @@ never consumes the caller's stream).
 
 from __future__ import annotations
 
-import inspect
+from functools import partial
 from typing import Any
 
 from ..capture import AuscultTracer
-from ..context import require_tracer
+from ._patch import patch_create
 from ._serialize import to_text
-
-_WRAPPED_MARKER = "_auscult_wrapped"
 
 
 def wrap_openai[ClientT](client: ClientT, *, tracer: AuscultTracer | None = None) -> ClientT:
@@ -42,75 +40,36 @@ def wrap_openai[ClientT](client: ClientT, *, tracer: AuscultTracer | None = None
     active in the ambient run context at call time, so one wrapped client can
     be shared across many runs.
     """
-    wrapped_any = False
-
     chat = getattr(client, "chat", None)
-    completions = getattr(chat, "completions", None)
-    if completions is not None and hasattr(completions, "create"):
-        _patch_create(completions, kind="chat.completions", tracer=tracer)
-        wrapped_any = True
-
-    responses = getattr(client, "responses", None)
-    if responses is not None and hasattr(responses, "create"):
-        _patch_create(responses, kind="responses", tracer=tracer)
-        wrapped_any = True
-
-    if not wrapped_any:
+    resources = {
+        "chat.completions": getattr(chat, "completions", None),
+        "responses": getattr(client, "responses", None),
+    }
+    patchable = {
+        kind: resource
+        for kind, resource in resources.items()
+        if resource is not None and hasattr(resource, "create")
+    }
+    if not patchable:
         raise TypeError(
             "wrap_openai: client has neither chat.completions.create nor "
             "responses.create; is this an OpenAI-style client?"
         )
+    for kind, resource in patchable.items():
+        patch_create(
+            resource,
+            tracer=tracer,
+            format_command=partial(_format_command, kind),
+            extract_output=partial(_extract_output, kind),
+        )
     return client
-
-
-def _patch_create(resource: Any, *, kind: str, tracer: AuscultTracer | None) -> None:
-    original = resource.create
-    if getattr(original, _WRAPPED_MARKER, False):
-        return
-
-    def resolve_tracer() -> AuscultTracer:
-        return tracer if tracer is not None else require_tracer()
-
-    if inspect.iscoroutinefunction(original):
-
-        async def async_create(*args: Any, **kwargs: Any) -> Any:
-            active = resolve_tracer()
-            command = _format_command(kind, kwargs)
-            try:
-                response = await original(*args, **kwargs)
-            except Exception as exc:
-                active.record_step(command, output=None, error_message=str(exc))
-                raise
-            active.record_step(command, output=_extract_output(kind, kwargs, response))
-            return response
-
-        setattr(async_create, _WRAPPED_MARKER, True)
-        resource.create = async_create
-        return
-
-    def create(*args: Any, **kwargs: Any) -> Any:
-        active = resolve_tracer()
-        command = _format_command(kind, kwargs)
-        try:
-            response = original(*args, **kwargs)
-        except Exception as exc:
-            active.record_step(command, output=None, error_message=str(exc))
-            raise
-        active.record_step(command, output=_extract_output(kind, kwargs, response))
-        return response
-
-    setattr(create, _WRAPPED_MARKER, True)
-    resource.create = create
 
 
 def _format_command(kind: str, kwargs: dict[str, Any]) -> str:
     payload: dict[str, Any] = {"api": kind}
-    if "model" in kwargs:
-        payload["model"] = kwargs["model"]
-    if "messages" in kwargs:
-        payload["messages"] = kwargs["messages"]
-    if "input" in kwargs:
-        payload["input"] = kwargs["input"]
+    for key in ("model", "messages", "input"):
+        if key in kwargs:
+            payload[key] = kwargs[key]
     return to_text(payload)
 
 

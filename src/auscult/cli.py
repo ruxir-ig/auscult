@@ -7,18 +7,20 @@ import importlib
 import json
 import os
 import sys
+from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import asdict
 from datetime import datetime
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy import select
 
 from .db import get_session
 from .eval import evaluate, format_report
-from .export import export_run, purge_runs_before
+from .export import export_run, purge_runs_before, run_to_dict, step_to_dict
 from .migrate import upgrade_head
 from .models import Run, Step
-from .replay import RunNotFoundError, RunReplayer, format_playback
+from .replay import RunNotFoundError, RunReplayer, fetch_run, format_playback
 from .sanitizer import DEFAULT_SPACY_MODEL, Sanitizer
 
 
@@ -49,47 +51,13 @@ def _print_step(step: Step) -> None:
     print(f"  entity_counts:   {step.entity_counts or {}}")
 
 
-def _run_to_dict(run: Run) -> dict[str, Any]:
-    return {
-        "id": run.id,
-        "agent_type": run.agent_type,
-        "status": run.status,
-        "total_steps": run.total_steps,
-        "failed_step": run.failed_step,
-        "redaction_count": run.redaction_count,
-        "entity_counts": run.entity_counts or {},
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "initial_prompt": run.initial_prompt,
-    }
-
-
-def _step_to_dict(step: Step) -> dict[str, Any]:
-    return {
-        "id": step.id,
-        "run_id": step.run_id,
-        "step_index": step.step_index,
-        "llm_command": step.llm_command,
-        "output": step.output,
-        "error_message": step.error_message,
-        "time_for_completion": step.time_for_completion,
-        "redaction_count": step.redaction_count,
-        "entity_counts": step.entity_counts or {},
-    }
-
-
 def _emit_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
-def _get_steps(session: Any, run_id: str) -> list[Step]:
-    return list(
-        session.execute(
-            select(Step).where(Step.run_id == run_id).order_by(Step.step_index)
-        )
-        .scalars()
-        .all()
-    )
+def _exit_not_found(exc: RunNotFoundError) -> NoReturn:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
 
 
 def _parse_since(value: str) -> datetime:
@@ -134,10 +102,10 @@ def _cmd_runs(
         if limit is not None:
             query = query.limit(limit)
 
-        runs = session.execute(query).scalars().all()
+        runs = session.scalars(query).all()
 
         if as_json:
-            _emit_json([_run_to_dict(run) for run in runs])
+            _emit_json([run_to_dict(run) for run in runs])
             return
 
         if not runs:
@@ -151,75 +119,50 @@ def _cmd_runs(
 
 def _cmd_run(run_id: str, *, as_json: bool) -> None:
     with get_session() as session:
-        run = session.get(Run, run_id)
-        if run is None:
-            print(f"Run {run_id} not found.", file=sys.stderr)
-            sys.exit(1)
+        try:
+            run, steps = fetch_run(session, run_id)
+        except RunNotFoundError as exc:
+            _exit_not_found(exc)
 
-        steps = _get_steps(session, run_id)
         if as_json:
-            payload = _run_to_dict(run)
-            payload["steps"] = [_step_to_dict(step) for step in steps]
-            _emit_json(payload)
+            _emit_json({**run_to_dict(run), "steps": [step_to_dict(step) for step in steps]})
             return
 
         _print_run(run)
-
-    print(f"\n{len(steps)} step(s):")
-    for step in steps:
-        print()
-        _print_step(step)
+        print(f"\n{len(steps)} step(s):")
+        for step in steps:
+            print()
+            _print_step(step)
 
 
 def _cmd_steps(run_id: str, *, as_json: bool) -> None:
     with get_session() as session:
-        run = session.get(Run, run_id)
-        if run is None:
-            print(f"Run {run_id} not found.", file=sys.stderr)
-            sys.exit(1)
+        try:
+            _, steps = fetch_run(session, run_id)
+        except RunNotFoundError as exc:
+            _exit_not_found(exc)
 
-        steps = _get_steps(session, run_id)
+        if as_json:
+            _emit_json([step_to_dict(step) for step in steps])
+            return
 
-    if as_json:
-        _emit_json([_step_to_dict(step) for step in steps])
-        return
+        if not steps:
+            print(f"No steps recorded for run {run_id}.")
+            return
 
-    if not steps:
-        print(f"No steps recorded for run {run_id}.")
-        return
-
-    for step in steps:
-        _print_step(step)
-        print()
+        for step in steps:
+            _print_step(step)
+            print()
 
 
 def _cmd_replay(run_id: str, *, as_json: bool) -> None:
     try:
         run = RunReplayer.from_run_id(run_id).run
     except RunNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
+        _exit_not_found(exc)
 
     if as_json:
-        _emit_json(
-            {
-                "run_id": run.run_id,
-                "agent_type": run.agent_type,
-                "status": run.status,
-                "failed_step": run.failed_step,
-                "initial_prompt": run.initial_prompt,
-                "steps": [
-                    {
-                        "step_index": step.step_index,
-                        "llm_command": step.llm_command,
-                        "output": step.output,
-                        "error_message": step.error_message,
-                        "time_for_completion": step.time_for_completion,
-                    }
-                    for step in run.steps
-                ],
-            }
-        )
+        _emit_json(asdict(run))
         return
 
     print(format_playback(run), end="")
@@ -235,8 +178,7 @@ def _cmd_compare(run_id: str, handler_spec: str, *, as_json: bool) -> None:
     try:
         result = RunReplayer.from_run_id(run_id).replay(handler)
     except RunNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
+        _exit_not_found(exc)
 
     if as_json:
         _emit_json(
@@ -245,12 +187,7 @@ def _cmd_compare(run_id: str, handler_spec: str, *, as_json: bool) -> None:
                 "all_matched": result.all_matched,
                 "steps": [
                     {
-                        "step_index": step.step_index,
-                        "llm_command": step.llm_command,
-                        "expected_output": step.expected_output,
-                        "actual_output": step.actual_output,
-                        "expected_error": step.expected_error,
-                        "actual_error": step.actual_error,
+                        **asdict(step),
                         "output_match": step.output_match,
                         "error_match": step.error_match,
                         "matched": step.matched,
@@ -285,66 +222,38 @@ def _cmd_stats(*, agent_type: str | None, as_json: bool) -> None:
         runs_query = select(Run)
         if agent_type is not None:
             runs_query = runs_query.where(Run.agent_type == agent_type)
-        runs = session.execute(runs_query).scalars().all()
+        runs = session.scalars(runs_query).all()
 
-        by_type: dict[str, dict[str, Any]] = {}
+        runs_by_type: dict[str, list[Run]] = defaultdict(list)
         for run in runs:
-            bucket = by_type.setdefault(
-                run.agent_type,
-                {
-                    "agent_type": run.agent_type,
-                    "runs": 0,
-                    "failed_runs": 0,
-                    "total_steps": 0,
-                    "step_latencies": [],
-                    "redactions": 0,
-                },
-            )
-            bucket["runs"] += 1
-            if run.status == "failed":
-                bucket["failed_runs"] += 1
-            bucket["total_steps"] += run.total_steps
-            bucket["redactions"] += run.redaction_count
+            runs_by_type[run.agent_type].append(run)
 
-        run_ids = [run.id for run in runs]
-        steps: list[Step] = []
-        if run_ids:
-            steps = list(
-                session.execute(select(Step).where(Step.run_id.in_(run_ids)))
-                .scalars()
-                .all()
-            )
         run_agent = {run.id: run.agent_type for run in runs}
-        for step in steps:
-            agent = run_agent.get(step.run_id)
-            if agent is None or agent not in by_type:
-                continue
-            if step.time_for_completion is not None:
-                by_type[agent]["step_latencies"].append(step.time_for_completion)
+        latencies: dict[str, list[float]] = defaultdict(list)
+        if run_agent:
+            steps = session.scalars(select(Step).where(Step.run_id.in_(list(run_agent))))
+            for step in steps:
+                if step.time_for_completion is not None:
+                    latencies[run_agent[step.run_id]].append(step.time_for_completion)
 
-        rows = []
-        for agent, bucket in sorted(by_type.items()):
-            run_count = bucket["runs"]
-            latencies: list[float] = bucket["step_latencies"]
-            rows.append(
-                {
-                    "agent_type": agent,
-                    "runs": run_count,
-                    "failed_runs": bucket["failed_runs"],
-                    "failure_rate": (
-                        bucket["failed_runs"] / run_count if run_count else 0.0
-                    ),
-                    "avg_steps": (
-                        bucket["total_steps"] / run_count if run_count else 0.0
-                    ),
-                    "avg_step_latency": (
-                        sum(latencies) / len(latencies) if latencies else None
-                    ),
-                    "avg_redactions": (
-                        bucket["redactions"] / run_count if run_count else 0.0
-                    ),
-                }
-            )
+    rows: list[dict[str, Any]] = []
+    for agent, agent_runs in sorted(runs_by_type.items()):
+        run_count = len(agent_runs)
+        failed_runs = sum(1 for run in agent_runs if run.status == "failed")
+        agent_latencies = latencies[agent]
+        rows.append(
+            {
+                "agent_type": agent,
+                "runs": run_count,
+                "failed_runs": failed_runs,
+                "failure_rate": failed_runs / run_count,
+                "avg_steps": sum(run.total_steps for run in agent_runs) / run_count,
+                "avg_step_latency": (
+                    sum(agent_latencies) / len(agent_latencies) if agent_latencies else None
+                ),
+                "avg_redactions": sum(run.redaction_count for run in agent_runs) / run_count,
+            }
+        )
 
     if as_json:
         _emit_json(rows)
@@ -375,11 +284,7 @@ def _cmd_export(run_id: str, *, fmt: str, output: str | None) -> None:
     try:
         text = export_run(run_id, fmt=fmt)
     except RunNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(2)
+        _exit_not_found(exc)
 
     if output:
         with open(output, "w", encoding="utf-8") as fh:
@@ -423,10 +328,7 @@ def _cmd_migrate(*, as_json: bool) -> None:
 
 def _cmd_setup(*, model: str, as_json: bool) -> None:
     """Download a spaCy model (models are not published on PyPI)."""
-    try:
-        from spacy.cli.download import download as spacy_download
-    except ImportError as exc:  # pragma: no cover - spacy is a hard dep
-        raise SystemExit(f"spaCy is required to download models: {exc}") from exc
+    from spacy.cli.download import download as spacy_download
 
     spacy_download(model)
     if as_json:

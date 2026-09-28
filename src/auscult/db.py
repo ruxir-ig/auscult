@@ -13,12 +13,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    return create_engine(os.environ["DATABASE_URL"], future=True)
+    return create_engine(os.environ["DATABASE_URL"])
 
 
 @lru_cache(maxsize=1)
 def _session_factory() -> sessionmaker[Session]:
-    return sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, future=True)
+    return sessionmaker(bind=get_engine(), autoflush=False)
 
 
 def get_session() -> Session:
