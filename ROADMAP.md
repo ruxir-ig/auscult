@@ -15,7 +15,7 @@ Prioritized follow-ups. Items marked **done** shipped; the rest are next.
 - [x] `auscult export` / `auscult purge` (retention)
 - [x] Golden-set PHI eval harness (`auscult eval`, packaged corpus)
 - [x] Optional dual-pass / ensemble NER (`AUSCULT_DUAL_PASS_MODEL`)
-- [x] Optional small spaCy model packaging (`sm` / `trf` extras; `sm` in dev group)
+- [x] Optional spaCy model packaging (`nlp` / `nlp-trf` dependency groups; `sm` in dev group)
 - [x] DB indexes: `runs(agent_type, started_at)`, `runs(status, started_at)`,
       unique `(run_id, step_index)` on `steps`
 - [x] Pluggable capture: ambient run context (`start_run` / `@observe_run`),
@@ -27,7 +27,6 @@ Prioritized follow-ups. Items marked **done** shipped; the rest are next.
 
 - More framework adapters: CrewAI, AutoGen, LlamaIndex, OpenAI Agents SDK
 - OpenTelemetry span exporter so Auscult runs appear in existing APM traces
-
 - Sample-and-audit UI for false-negative review
 - Per-tenant allow/deny list config files
 - Metrics export (Prometheus) for redaction rate / queue depth

@@ -76,7 +76,18 @@ Capture can also be used explicitly with `AuscultTracer`, `start_run`, and `reco
 
 ## Important limitation
 
-PHI protection is detection-based. Detectors can miss sensitive information, so validate performance on representative data and treat stored traces as sensitive until your organization has approved their use. Do not use real patient data for a demo. Development is ongoing, in order to mitigate this.
+PHI protection is detection-based. Detectors can miss sensitive information, so validate performance on representative data and treat stored traces as sensitive until your organization has approved their use. Do not use real patient data for a demo. Use `auscult eval` to measure detection precision and recall on the packaged corpus or your own.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | required | SQLAlchemy URL for trace storage. |
+| `AUSCULT_SPACY_MODEL` | `en_core_web_lg` | spaCy model used for PHI detection. |
+| `AUSCULT_SCORE_THRESHOLD` | `0.35` | Minimum detector confidence to redact. Lower redacts more. |
+| `AUSCULT_DUAL_PASS_MODEL` | unset | Optional second spaCy model whose PERSON and LOCATION hits are merged in. |
+
+`AuscultTracer` and `start_run` also accept `background=True` to sanitize and write steps on a worker thread, and `commit_each_step=False` to commit once when the run finishes.
 
 ## Development
 
@@ -121,4 +132,21 @@ with start_run("triage-agent", initial_prompt=prompt):
     record_step("manual_annotation()", output="Review recommended")
 ```
 
-The database URL is read from `DATABASE_URL`. SQLite is convenient for local demos; PostgreSQL is also supported. Use `uv run auscult --help` to see CLI commands.
+The database URL is read from `DATABASE_URL`. SQLite is convenient for local demos; PostgreSQL is also supported.
+
+## CLI
+
+Every command accepts `--json` before the subcommand, as in `auscult --json runs`.
+
+| Command | Purpose |
+| --- | --- |
+| `setup` | Download a spaCy model. |
+| `migrate` | Apply database migrations. |
+| `runs`, `run`, `steps` | List runs, or show one run and its steps. |
+| `replay` | Play back a recorded run. |
+| `compare` | Re-run a `module:function` handler against a run and diff the results. |
+| `stats` | Failure rate, steps, latency, and redactions per agent type. |
+| `export`, `purge` | Export a run as JSON or JSONL, or delete finished runs before a cutoff. |
+| `eval` | Score PHI detection on the golden corpus. |
+
+Use `uv run auscult <command> --help` for flags.
