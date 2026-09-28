@@ -8,3 +8,18 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local environment and database files
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
