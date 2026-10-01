@@ -66,6 +66,7 @@ def record_codex_events(
     tracer: AuscultTracer,
     *,
     sanitizer: Sanitizer | None = None,
+    sanitize_final_message: bool = True,
 ) -> CodexSummary:
     """Record each completed Codex item on ``tracer`` as a step.
 
@@ -82,8 +83,10 @@ def record_codex_events(
     new :class:`Sanitizer` seeded from the run id), so its synthetic values
     can differ from the stored step's. For the exact stored text, read step
     ``summary.final_message_step`` after the tracer finishes, as
-    :func:`run_codex` and :func:`ingest_codex_events` do. Do not pass a
-    sanitizer that a background tracer's worker thread is using.
+    :func:`run_codex` and :func:`ingest_codex_events` do; they pass
+    ``sanitize_final_message=False`` to skip this extra pass, leaving
+    ``summary.final_message`` as None. Do not pass a sanitizer that a
+    background tracer's worker thread is using.
     """
     summary = CodexSummary()
     turn_open = False
@@ -148,7 +151,7 @@ def record_codex_events(
             error_message="Codex stream ended before the turn completed",
         )
         summary.failed = True
-    if raw_final_message:
+    if raw_final_message and sanitize_final_message:
         active = sanitizer or Sanitizer(seed=tracer.run_id)
         summary.final_message = active.sanitize(raw_final_message)
     return summary
@@ -170,7 +173,7 @@ def ingest_codex_events(
         ) as tracer,
         path.open(encoding="utf-8") as fh,
     ):
-        summary = record_codex_events(fh, tracer)
+        summary = record_codex_events(fh, tracer, sanitize_final_message=False)
     return _result(tracer, summary, exit_code=None)
 
 
@@ -200,7 +203,7 @@ def run_codex(
         )
         assert process.stdout is not None
         with process:
-            summary = record_codex_events(process.stdout, tracer)
+            summary = record_codex_events(process.stdout, tracer, sanitize_final_message=False)
         exit_code = process.returncode
     except BaseException:
         tracer.finish(crashed=True)
@@ -223,8 +226,8 @@ def _result(tracer: AuscultTracer, summary: CodexSummary, *, exit_code: int | No
 def _stored_final_message(tracer: AuscultTracer, summary: CodexSummary) -> str | None:
     """The final agent message exactly as stored, so pseudonyms match the trace.
 
-    Falls back to ``summary.final_message`` (also sanitized) when the run is
-    not finished or the step is missing.
+    Falls back to ``summary.final_message`` (sanitized, or None) when the run
+    is not finished or the step is missing. Raw text is never returned.
     """
     if not tracer.finished or summary.final_message_step is None:
         return summary.final_message

@@ -15,6 +15,7 @@ from auscult.capture import AuscultTracer
 from auscult.db import get_session
 from auscult.integrations.codex import ingest_codex_events, record_codex_events, run_codex
 from auscult.models import Run, Step
+from auscult.sanitizer import Sanitizer
 
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_exec_events.jsonl"
 
@@ -143,6 +144,20 @@ def test_returned_final_message_matches_stored_step(db, tmp_path: Path, backgrou
     _, steps = _load(result.run_id)
     assert result.final_message == steps[1].output
     assert "John Smith" not in (result.final_message or "")
+
+
+def test_ingest_uses_only_the_tracer_sanitizer(db, monkeypatch) -> None:
+    # A caller-supplied sanitizer must be the only one that analyzes text, so
+    # a missing default spaCy model cannot break the capture.
+    from auscult.integrations import codex
+
+    def no_default_sanitizer(*args, **kwargs):
+        raise AssertionError("a default Sanitizer was constructed")
+
+    custom = Sanitizer(nlp_model="en_core_web_sm")
+    monkeypatch.setattr(codex, "Sanitizer", no_default_sanitizer)
+    result = ingest_codex_events(FIXTURE, prompt="x", sanitizer=custom)
+    assert result.final_message == "done"
 
 
 def test_malformed_event_fails_run(db) -> None:
