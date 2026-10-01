@@ -128,3 +128,16 @@ def test_cmd_setup_invokes_spacy_download(monkeypatch, capsys) -> None:
     cli.main()
     assert calls == ["en_core_web_sm"]
     assert "en_core_web_sm" in capsys.readouterr().out
+
+
+def test_cmd_demo_json(migrated_db, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["auscult", "--json", "demo"])
+    cli.main()
+    payload = json.loads(capsys.readouterr().out)
+
+    monkeypatch.setattr(sys, "argv", ["auscult", "--json", "run", payload["run_id"]])
+    cli.main()
+    run = json.loads(capsys.readouterr().out)
+    assert run["status"] == "completed"
+    assert "Jane Example" not in run["initial_prompt"]
+    assert len(run["steps"]) == 1
