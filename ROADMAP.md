@@ -22,6 +22,10 @@ Prioritized follow-ups. Items marked **done** shipped; the rest are next.
       OpenAI/Anthropic client wrappers, LangChain/LangGraph callback handler
 - [x] PyPI-ready packaging: MIT license, metadata, `auscult setup` / `auscult migrate`,
       spaCy models via post-install (not direct URL deps), Trusted Publishing workflow
+- [x] Codex CLI capture: `auscult codex` runs or ingests `codex exec --json`
+- [x] PHI guard before agent context: `read_sanitized`, `@guard_tool`,
+      `auscult sanitize`, `auscult guard-hook` (Claude Code `PreToolUse`)
+- [x] `auscult demo` and a clinician feedback issue form
 
 ## Later / ideas
 

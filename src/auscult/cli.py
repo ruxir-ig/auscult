@@ -16,12 +16,13 @@ from typing import Any, NoReturn
 from sqlalchemy import select
 
 from .db import get_session
+from .demo import DEFAULT_DEMO_DATABASE_URL
 from .eval import evaluate, format_report
 from .export import export_run, purge_runs_before, run_to_dict, step_to_dict
 from .migrate import upgrade_head
 from .models import Run, Step
 from .replay import RunNotFoundError, RunReplayer, fetch_run, format_playback
-from .sanitizer import DEFAULT_SPACY_MODEL, Sanitizer
+from .sanitizer import DEFAULT_SPACY_MODEL, Sanitizer, SanitizeResult
 
 
 def _print_run(run: Run) -> None:
@@ -361,6 +362,124 @@ def _cmd_eval(
         sys.exit(1)
 
 
+def _cmd_sanitize(paths: list[str], *, check: bool, as_json: bool) -> None:
+    """Print sanitized file contents (or stdin) so agents read masked text."""
+    sanitizer = Sanitizer()
+    sources: list[tuple[str, SanitizeResult]] = []
+    if not paths:
+        sources.append(("-", sanitizer.sanitize_with_stats(sys.stdin.read())))
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                sources.append((path, sanitizer.sanitize_with_stats(fh.read())))
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"Cannot read {path}: {exc}", file=sys.stderr)
+            sys.exit(2)
+
+    found = any(result.redaction_count for _, result in sources)
+    if as_json:
+        _emit_json(
+            [
+                {
+                    "path": path,
+                    "redaction_count": result.redaction_count,
+                    "entity_counts": result.entity_counts,
+                    **({} if check else {"text": result.text}),
+                }
+                for path, result in sources
+            ]
+        )
+    elif check:
+        for path, result in sources:
+            if result.redaction_count:
+                print(f"{path}: {result.redaction_count} PHI entities {result.entity_counts}")
+    else:
+        for index, (path, result) in enumerate(sources):
+            text = result.text or ""
+            if len(sources) > 1:
+                # head(1)-style headers keep file boundaries visible.
+                if index:
+                    print()
+                print(f"==> {path} <==")
+                if text and not text.endswith("\n"):
+                    text += "\n"
+            sys.stdout.write(text)
+    if check and found:
+        sys.exit(1)
+
+
+def _cmd_guard_hook() -> None:
+    """Pre-tool hook: exit 2 (block) when the targeted file contains PHI."""
+    from .guard import check_hook_payload
+
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError as exc:
+        print(f"auscult guard-hook: invalid hook payload: {exc}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        decision = check_hook_payload(payload if isinstance(payload, dict) else {})
+    except Exception as exc:  # noqa: BLE001 — a hook error must still block (exit 2)
+        print(f"auscult guard-hook: blocked after internal error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    if not decision.allow:
+        print(f"Blocked by auscult guard-hook: {decision.reason}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _cmd_codex(
+    prompt: str | None,
+    *,
+    events: str | None,
+    agent_type: str,
+    codex_args: list[str],
+    as_json: bool,
+) -> None:
+    from .integrations.codex import ingest_codex_events, run_codex
+
+    if events is not None:
+        result = ingest_codex_events(events, prompt=prompt, agent_type=agent_type)
+    elif prompt is None:
+        print("auscult codex: a prompt is required unless --events is given", file=sys.stderr)
+        sys.exit(2)
+    else:
+        try:
+            result = run_codex(prompt, agent_type=agent_type, codex_args=codex_args)
+        except FileNotFoundError:
+            print("auscult codex: the `codex` CLI was not found on PATH", file=sys.stderr)
+            sys.exit(2)
+
+    if as_json:
+        _emit_json(asdict(result))
+    else:
+        if result.final_message:
+            print(result.final_message.rstrip())
+            print()
+        status = "failed" if result.failed else "completed"
+        print(f"Run ID: {result.run_id} ({status})")
+        if result.thread_id:
+            print(f"Codex thread: {result.thread_id}")
+    if result.failed:
+        sys.exit(result.exit_code or 1)
+
+
+def _cmd_demo(*, as_json: bool) -> None:
+    from .demo import display_database_url, follow_up_commands, run_demo
+    from .demo import main as demo_main
+
+    if as_json:
+        run_id = run_demo()
+        _emit_json(
+            {
+                "run_id": run_id,
+                "database_url": display_database_url(),
+                "commands": follow_up_commands(run_id),
+            }
+        )
+    else:
+        demo_main()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="auscult")
     parser.add_argument(
@@ -485,6 +604,52 @@ def main() -> None:
         help="Apply database migrations (creates runs/steps tables).",
     )
 
+    subparsers.add_parser(
+        "demo",
+        help="Capture one run with synthetic data (defaults to a SQLite file in /tmp).",
+    )
+
+    codex_parser = subparsers.add_parser(
+        "codex",
+        help="Run `codex exec --json` (or ingest its saved output) as a captured run.",
+    )
+    codex_parser.add_argument(
+        "prompt",
+        nargs="?",
+        help="Prompt for Codex (optional with --events, where it labels the run).",
+    )
+    codex_parser.add_argument(
+        "--events",
+        help="Ingest a saved `codex exec --json` JSONL file instead of running Codex.",
+    )
+    codex_parser.add_argument(
+        "--agent-type", default="codex", help="agent_type for the run (default: codex)."
+    )
+    codex_parser.add_argument(
+        "--codex-arg",
+        dest="codex_args",
+        action="append",
+        default=[],
+        help="Extra argument for `codex exec`; repeat as needed "
+        "(e.g. --codex-arg=-s --codex-arg=read-only).",
+    )
+
+    sanitize_parser = subparsers.add_parser(
+        "sanitize",
+        help="Print files (or stdin) with PHI replaced, for agents to read.",
+    )
+    sanitize_parser.add_argument("paths", nargs="*", help="Files to sanitize (default: stdin).")
+    sanitize_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Report PHI counts instead of text; exit 1 if any PHI is found.",
+    )
+
+    subparsers.add_parser(
+        "guard-hook",
+        help="Pre-tool hook for coding agents: block reads of files that contain PHI.",
+    )
+
     args = parser.parse_args()
     as_json = bool(args.json)
 
@@ -501,6 +666,16 @@ def main() -> None:
         return
     if args.command == "setup":
         _cmd_setup(model=args.model, as_json=as_json)
+        return
+    if args.command == "sanitize":
+        _cmd_sanitize(args.paths, check=args.check, as_json=as_json)
+        return
+    if args.command == "guard-hook":
+        _cmd_guard_hook()
+        return
+    if args.command == "demo":
+        os.environ.setdefault("DATABASE_URL", DEFAULT_DEMO_DATABASE_URL)
+        _cmd_demo(as_json=as_json)
         return
 
     if "DATABASE_URL" not in os.environ:
@@ -532,6 +707,14 @@ def main() -> None:
         _cmd_stats(agent_type=args.agent_type, as_json=as_json)
     elif args.command == "export":
         _cmd_export(args.run_id, fmt=args.fmt, output=args.output)
+    elif args.command == "codex":
+        _cmd_codex(
+            args.prompt,
+            events=args.events,
+            agent_type=args.agent_type,
+            codex_args=args.codex_args,
+            as_json=as_json,
+        )
     elif args.command == "purge":
         _cmd_purge(
             before=args.before,

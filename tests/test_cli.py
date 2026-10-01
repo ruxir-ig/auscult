@@ -128,3 +128,28 @@ def test_cmd_setup_invokes_spacy_download(monkeypatch, capsys) -> None:
     cli.main()
     assert calls == ["en_core_web_sm"]
     assert "en_core_web_sm" in capsys.readouterr().out
+
+
+def test_cmd_demo_json(migrated_db, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["auscult", "--json", "demo"])
+    cli.main()
+    payload = json.loads(capsys.readouterr().out)
+
+    monkeypatch.setattr(sys, "argv", ["auscult", "--json", "run", payload["run_id"]])
+    cli.main()
+    run = json.loads(capsys.readouterr().out)
+    assert run["status"] == "completed"
+    assert "Jane Example" not in run["initial_prompt"]
+    assert len(run["steps"]) == 1
+
+
+def test_demo_output_hides_database_password(monkeypatch) -> None:
+    from auscult.demo import DEFAULT_DEMO_DATABASE_URL, display_database_url, follow_up_commands
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://auscult:s3cret-pw@db.example:5432/traces")
+    assert display_database_url() == "postgresql://auscult:***@db.example:5432/traces"
+    assert follow_up_commands("run-1") == ["auscult run run-1", "auscult replay run-1"]
+
+    # The credential-free default URL is spelled out on its own export line.
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DEMO_DATABASE_URL)
+    assert follow_up_commands("run-1")[0] == f"export DATABASE_URL={DEFAULT_DEMO_DATABASE_URL}"

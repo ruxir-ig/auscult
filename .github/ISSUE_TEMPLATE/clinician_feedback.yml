@@ -1,0 +1,41 @@
+name: Clinician / health professional feedback
+description: Tell us how Auscult fits (or doesn't fit) clinical and health-system workflows.
+title: "[Feedback] "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Auscult. **Do not include real patient data, screenshots of
+        real records, or any PHI in this form.** Use synthetic examples only.
+  - type: dropdown
+    id: role
+    attributes:
+      label: Your role
+      options:
+        - Clinician
+        - Nurse
+        - Clinical informatics
+        - Compliance / privacy
+        - Health-system engineering
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What did you try?
+      description: For example `auscult demo`, the Codex capture, or the PHI guard.
+    validations:
+      required: true
+  - type: textarea
+    id: missed
+    attributes:
+      label: PHI that was missed or wrongly masked
+      description: Describe the pattern with a synthetic example (for example, "MRN format AB-123456 was not masked").
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What would make this useful in your workflow?
+    validations:
+      required: true

@@ -18,7 +18,9 @@ All package code lives in src/auscult/:
 - capture.py contains the AuscultTracer class
 - writer.py runs the background write queue for `AuscultTracer(background=True)`
 - context.py holds the ambient run context (`start_run`, `observe_run`, `record_step`)
-- integrations/ wraps OpenAI and Anthropic clients and provides a LangChain callback handler
+- integrations/ wraps OpenAI and Anthropic clients, provides a LangChain callback handler, and captures Codex `exec --json` streams
+- guard.py sanitizes files and tool results before an agent reads them (`auscult sanitize`, `auscult guard-hook`)
+- demo.py captures one synthetic run for `auscult demo`
 - replay.py loads and replays sanitized runs
 - export.py exports runs as JSON/JSONL and purges old runs
 - eval.py scores PHI detection against data/phi_eval_corpus.jsonl

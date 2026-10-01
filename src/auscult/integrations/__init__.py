@@ -8,6 +8,8 @@ agent loops:
 - :mod:`auscult.integrations.anthropic` — same for Anthropic clients.
 - :mod:`auscult.integrations.langchain` — a LangChain / LangGraph callback
   handler; pass it via ``config={"callbacks": [...]}``.
+- :mod:`auscult.integrations.codex` — record a Codex CLI session from its
+  ``codex exec --json`` event stream (live or saved).
 
 All adapters resolve the tracer from the ambient run context
 (:mod:`auscult.context`) unless one is passed explicitly, so a single
