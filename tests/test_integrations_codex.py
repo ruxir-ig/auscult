@@ -174,13 +174,16 @@ def test_malformed_event_fails_run(db) -> None:
     ]
 
 
-@pytest.mark.parametrize("drop", ["turn.completed", "everything after turn.started"])
-def test_truncated_stream_fails_run(db, drop: str) -> None:
-    lines = FIXTURE.read_text().splitlines()
-    if drop == "turn.completed":
-        lines = lines[:-1]
-    else:
-        lines = lines[:2]
+@pytest.mark.parametrize(
+    "lines",
+    [
+        FIXTURE.read_text().splitlines()[:-1],  # no turn.completed
+        FIXTURE.read_text().splitlines()[:2],  # nothing after turn.started
+        ["", "codex: warning"],  # no turn at all
+    ],
+    ids=["missing-turn-completed", "stops-after-turn-started", "no-turn"],
+)
+def test_truncated_stream_fails_run(db, lines: list[str]) -> None:
     with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
         summary = record_codex_events(lines, tracer)
 
@@ -188,12 +191,6 @@ def test_truncated_stream_fails_run(db, drop: str) -> None:
     assert summary.failed
     assert run.status == "failed"
     assert steps[-1].error_message == "Codex stream ended before the turn completed"
-
-
-def test_empty_stream_fails_run(db) -> None:
-    with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
-        summary = record_codex_events(["", "codex: warning"], tracer)
-    assert summary.failed
 
 
 @pytest.fixture()
@@ -211,22 +208,15 @@ def fake_codex(tmp_path: Path) -> Path:
     return script
 
 
-def test_run_codex_subprocess(db, fake_codex: Path) -> None:
-    result = run_codex("Read the note", codex_bin=str(fake_codex), codex_args=["-s", "read-only"])
+@pytest.mark.parametrize(("prompt", "exit_code"), [("Read the note", 0), ("fail", 1)])
+def test_run_codex_subprocess(db, fake_codex: Path, prompt: str, exit_code: int) -> None:
+    result = run_codex(prompt, codex_bin=str(fake_codex), codex_args=["-s", "read-only"])
     run, steps = _load(result.run_id)
-    assert result.exit_code == 0
-    assert not result.failed
-    assert run.status == "completed"
-    assert run.initial_prompt == "Read the note"
+    assert result.exit_code == exit_code
+    assert result.failed is bool(exit_code)
+    assert run.status == ("failed" if exit_code else "completed")
+    assert run.initial_prompt == prompt
     assert len(steps) == 3
-
-
-def test_run_codex_nonzero_exit_fails_run(db, fake_codex: Path) -> None:
-    result = run_codex("fail", codex_bin=str(fake_codex))
-    run, _ = _load(result.run_id)
-    assert result.exit_code == 1
-    assert result.failed
-    assert run.status == "failed"
 
 
 def test_cli_codex_events_json(db, capsys, monkeypatch) -> None:

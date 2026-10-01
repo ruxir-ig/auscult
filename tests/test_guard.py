@@ -38,22 +38,11 @@ def test_read_sanitized_replaces_phi(phi_file: Path) -> None:
     assert "chest pain" in text
 
 
-def test_guard_tool_sanitizes_str_and_json_results() -> None:
+def test_guard_tool_sanitizes_strings_keys_and_numbers() -> None:
     @guard_tool
     def fetch_note() -> str:
         return PHI_TEXT
 
-    @guard_tool
-    def fetch_record() -> dict:
-        return {"phone": "555-867-5309", "visits": [1, 2]}
-
-    assert "555-867-5309" not in fetch_note()
-    record = fetch_record()
-    assert record["phone"] != "555-867-5309"
-    assert record["visits"] == [1, 2]
-
-
-def test_guard_tool_scans_keys_and_numbers() -> None:
     @guard_tool
     def fetch_contacts() -> dict:
         return {
@@ -62,6 +51,7 @@ def test_guard_tool_scans_keys_and_numbers() -> None:
             "readings": [98.6, None],
         }
 
+    assert "555-867-5309" not in fetch_note()
     result = fetch_contacts()
     dumped = json.dumps(result)
     assert "555-867-5309" not in dumped
@@ -74,16 +64,7 @@ def test_guard_tool_scans_keys_and_numbers() -> None:
     assert result["readings"] == [98.6, None]
 
 
-def test_guard_tool_rejects_nested_unknown_types() -> None:
-    @guard_tool
-    def fetch() -> dict:
-        return {"blob": b"555-867-5309"}
-
-    with pytest.raises(TypeError):
-        fetch()
-
-
-def test_guard_tool_async_and_rejects_unknown_types() -> None:
+def test_guard_tool_async_and_rejects_unsupported_types() -> None:
     @guard_tool()
     async def fetch_note() -> str:
         return PHI_TEXT
@@ -92,9 +73,15 @@ def test_guard_tool_async_and_rejects_unknown_types() -> None:
     def fetch_bytes() -> bytes:
         return PHI_TEXT.encode()
 
+    @guard_tool
+    def fetch_nested_bytes() -> dict:
+        return {"blob": b"555-867-5309"}
+
     assert "555-867-5309" not in asyncio.run(fetch_note())
     with pytest.raises(TypeError):
         fetch_bytes()
+    with pytest.raises(TypeError):
+        fetch_nested_bytes()
 
 
 def test_hook_blocks_phi_and_allows_clean(phi_file: Path, clean_file: Path) -> None:
