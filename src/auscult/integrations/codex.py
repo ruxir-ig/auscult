@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..capture import AuscultTracer
+from ..sanitizer import Sanitizer
 from ._serialize import to_text
 
 
@@ -56,18 +57,41 @@ class CodexResult:
 
 
 def record_codex_events(
-    events: Iterable[str | Mapping[str, Any]], tracer: AuscultTracer
+    events: Iterable[str | Mapping[str, Any]],
+    tracer: AuscultTracer,
+    *,
+    sanitizer: Sanitizer | None = None,
 ) -> CodexSummary:
     """Record each completed Codex item on ``tracer`` as a step.
 
-    ``events`` are JSONL lines or already-decoded events. Lines that are not
-    JSON objects (blank lines, CLI warnings) are skipped. ``item.started`` and
-    ``item.updated`` events are ignored; only the final state of an item is
-    recorded.
+    ``events`` are JSONL lines or already-decoded events. Blank lines and
+    lines that do not start with ``{`` (CLI warnings) are skipped.
+    ``item.started`` and ``item.updated`` events are ignored; only the final
+    state of an item is recorded.
+
+    The run is marked failed (with an error step) when a line starts with
+    ``{`` but is not a JSON object, or when the stream ends before a turn
+    completes, so a truncated capture is never reported as a success.
+
+    ``summary.final_message`` is sanitized with ``sanitizer`` (default: a
+    new :class:`Sanitizer` seeded from the run id). Do not pass a sanitizer
+    that a background tracer's worker thread is using.
     """
     summary = CodexSummary()
-    for raw in events:
-        event = _decode(raw)
+    turn_open = False
+    turns_finished = 0
+    raw_final_message: str | None = None
+    for line_number, raw in enumerate(events, start=1):
+        try:
+            event = _decode(raw)
+        except ValueError:
+            tracer.record_step(
+                to_text({"type": "malformed_event"}),
+                output=None,
+                error_message=f"malformed Codex event on line {line_number}",
+            )
+            summary.failed = True
+            continue
         if event is None:
             continue
         match event.get("type"):
@@ -80,12 +104,18 @@ def record_codex_events(
                 command, output, error = _item_step(item)
                 tracer.record_step(command, output=output, error_message=error)
                 if item.get("type") == "agent_message":
-                    summary.final_message = item.get("text")
+                    raw_final_message = item.get("text")
                 if error is not None:
                     summary.failed = True
+            case "turn.started":
+                turn_open = True
             case "turn.completed":
+                turn_open = False
+                turns_finished += 1
                 summary.usage = event.get("usage")
             case "turn.failed":
+                turn_open = False
+                turns_finished += 1
                 failure = event.get("error")
                 message = failure.get("message") if isinstance(failure, Mapping) else None
                 tracer.record_step(
@@ -101,6 +131,16 @@ def record_codex_events(
                     error_message=event.get("message") or "Codex stream error",
                 )
                 summary.failed = True
+    if turn_open or turns_finished == 0:
+        tracer.record_step(
+            to_text({"type": "incomplete_stream"}),
+            output=None,
+            error_message="Codex stream ended before the turn completed",
+        )
+        summary.failed = True
+    if raw_final_message:
+        active = sanitizer or Sanitizer(seed=tracer.run_id)
+        summary.final_message = active.sanitize(raw_final_message)
     return summary
 
 
@@ -120,7 +160,7 @@ def ingest_codex_events(
         ) as tracer,
         path.open(encoding="utf-8") as fh,
     ):
-        summary = record_codex_events(fh, tracer)
+        summary = record_codex_events(fh, tracer, sanitizer=_caller_sanitizer(tracer_kwargs))
     return _result(tracer, summary, exit_code=None)
 
 
@@ -150,7 +190,9 @@ def run_codex(
         )
         assert process.stdout is not None
         with process:
-            summary = record_codex_events(process.stdout, tracer)
+            summary = record_codex_events(
+                process.stdout, tracer, sanitizer=_caller_sanitizer(tracer_kwargs)
+            )
         exit_code = process.returncode
     except BaseException:
         tracer.finish(crashed=True)
@@ -170,17 +212,25 @@ def _result(tracer: AuscultTracer, summary: CodexSummary, *, exit_code: int | No
     )
 
 
+def _caller_sanitizer(tracer_kwargs: Mapping[str, Any]) -> Sanitizer | None:
+    """The caller's sanitizer, unless a background worker thread owns it."""
+    if tracer_kwargs.get("background"):
+        return None
+    sanitizer = tracer_kwargs.get("sanitizer")
+    return sanitizer if isinstance(sanitizer, Sanitizer) else None
+
+
 def _decode(raw: str | Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Return the event, None for a line to skip, or raise ``ValueError``."""
     if isinstance(raw, Mapping):
         return raw
     line = raw.strip()
     if not line.startswith("{"):
         return None
-    try:
-        event = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return event if isinstance(event, Mapping) else None
+    event = json.loads(line)  # JSONDecodeError is a ValueError
+    if not isinstance(event, Mapping):
+        raise ValueError("Codex event is not a JSON object")
+    return event
 
 
 def _item_step(item: Mapping[str, Any]) -> tuple[str, str | None, str | None]:

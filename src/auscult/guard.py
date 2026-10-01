@@ -16,14 +16,12 @@ unreviewed data safe to give to a model.
 from __future__ import annotations
 
 import inspect
-import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
 from typing import Any, cast, overload
 
-from .integrations._serialize import to_text
 from .sanitizer import Sanitizer, SanitizeResult
 
 # Keys coding agents use for the target file in tool-call payloads.
@@ -62,7 +60,8 @@ def guard_tool[**P, R](
 
     String results are sanitized as text. ``dict`` / ``list`` results are
     sanitized leaf by leaf and returned with the same structure. Any other
-    result type raises ``TypeError`` (fail-closed). One sanitizer is shared
+    result type raises ``TypeError`` (fail-closed). Dict keys and numbers are
+    scanned too, since a tool can return identifiers in either. One sanitizer is shared
     across calls, so the same real value maps to the same synthetic value.
     Works on sync and async functions.
     """
@@ -91,13 +90,40 @@ def guard_tool[**P, R](
 
 
 def _sanitize_result(sanitizer: Sanitizer, result: Any) -> Any:
-    if result is None or isinstance(result, str):
-        return sanitizer.sanitize(result)
-    if isinstance(result, dict | list):
-        return json.loads(sanitizer.sanitize(to_text(result)) or "null")
+    if result is None or isinstance(result, str | dict | list):
+        return _sanitize_value(sanitizer, result)
     raise TypeError(
         f"guard_tool cannot sanitize a {type(result).__name__} result; return str, dict, or list"
     )
+
+
+def _sanitize_value(sanitizer: Sanitizer, value: Any) -> Any:
+    """Sanitize every string, number, and dict key in a JSON-like value.
+
+    A number that is detected as PHI (e.g. a phone number stored as an int)
+    is replaced by its synthetic string. Leaves of any other type raise
+    ``TypeError`` (fail-closed).
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return sanitizer.sanitize(value)
+    if isinstance(value, int | float):
+        result = sanitizer.sanitize_with_stats(str(value))
+        return result.text if result.redaction_count else value
+    if isinstance(value, list):
+        return [_sanitize_value(sanitizer, item) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[Any, Any] = {}
+        for key, item in value.items():
+            new_key = _sanitize_value(sanitizer, key)
+            if new_key in sanitized:
+                raise ValueError(
+                    "guard_tool: two keys map to the same sanitized key; refusing to drop data"
+                )
+            sanitized[new_key] = _sanitize_value(sanitizer, item)
+        return sanitized
+    raise TypeError(f"guard_tool cannot sanitize a {type(value).__name__} value")
 
 
 @dataclass(frozen=True)
@@ -127,9 +153,13 @@ def check_hook_payload(
         (value for key in _PATH_KEYS if isinstance(value := tool_input.get(key), str)),
         None,
     )
-    if path is None or not Path(path).is_file():
-        return HookDecision(allow=True, path=path)
+    if path is None:
+        return HookDecision(allow=True)
     try:
+        # is_file() raises on errors other than "not found" (e.g. EACCES on a
+        # parent directory), so it must stay inside the fail-closed block.
+        if not Path(path).is_file():
+            return HookDecision(allow=True, path=path)
         result = scan_file(path, sanitizer=sanitizer)
     except Exception as exc:  # noqa: BLE001 — fail closed on any scan error
         return HookDecision(allow=False, path=path, reason=f"could not scan file for PHI: {exc}")

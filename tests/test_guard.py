@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -52,6 +53,36 @@ def test_guard_tool_sanitizes_str_and_json_results() -> None:
     assert record["visits"] == [1, 2]
 
 
+def test_guard_tool_scans_keys_and_numbers() -> None:
+    @guard_tool
+    def fetch_contacts() -> dict:
+        return {
+            "555-867-5309": "phone",
+            "John Smith": {"phone": 5558675309, "age": 12, "active": True},
+            "readings": [98.6, None],
+        }
+
+    result = fetch_contacts()
+    dumped = json.dumps(result)
+    assert "555-867-5309" not in dumped
+    assert "5558675309" not in dumped
+    assert "John Smith" not in dumped
+    assert "phone" in result.values()
+    (patient,) = (v for v in result.values() if isinstance(v, dict))
+    assert patient["age"] == 12
+    assert patient["active"] is True
+    assert result["readings"] == [98.6, None]
+
+
+def test_guard_tool_rejects_nested_unknown_types() -> None:
+    @guard_tool
+    def fetch() -> dict:
+        return {"blob": b"555-867-5309"}
+
+    with pytest.raises(TypeError):
+        fetch()
+
+
 def test_guard_tool_async_and_rejects_unknown_types() -> None:
     @guard_tool()
     async def fetch_note() -> str:
@@ -83,6 +114,47 @@ def test_hook_fails_closed_on_unreadable_file(tmp_path: Path) -> None:
     decision = check_hook_payload({"tool_input": {"file_path": str(binary)}})
     assert not decision.allow
     assert decision.reason is not None and "could not scan" in decision.reason
+
+
+def test_hook_fails_closed_on_stat_error(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    note = locked / "note.txt"
+    note.write_text(PHI_TEXT)
+    locked.chmod(0o000)
+    try:
+        if os.access(note, os.R_OK):
+            pytest.skip("running with permissions that bypass directory modes")
+        decision = check_hook_payload({"tool_input": {"file_path": str(note)}})
+    finally:
+        locked.chmod(0o700)
+    assert not decision.allow
+    assert decision.reason is not None and "could not scan" in decision.reason
+
+
+def test_cli_guard_hook_blocks_on_internal_error(monkeypatch, capsys) -> None:
+    def boom(payload):
+        raise RuntimeError("detector crashed")
+
+    monkeypatch.setattr("auscult.guard.check_hook_payload", boom)
+    monkeypatch.setattr(sys, "stdin", io.StringIO('{"tool_input": {}}'))
+    monkeypatch.setattr(sys, "argv", ["auscult", "guard-hook"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    assert "detector crashed" in capsys.readouterr().err
+
+
+def test_cli_sanitize_multiple_files_keeps_boundaries(tmp_path: Path, capsys, monkeypatch) -> None:
+    first = tmp_path / "a.txt"
+    first.write_text("Recommend rest")  # no trailing newline
+    second = tmp_path / "b.txt"
+    second.write_text("Recommend fluids\n")
+    monkeypatch.setattr(sys, "argv", ["auscult", "sanitize", str(first), str(second)])
+    cli.main()
+    assert capsys.readouterr().out == (
+        f"==> {first} <==\nRecommend rest\n\n==> {second} <==\nRecommend fluids\n"
+    )
 
 
 def test_cli_sanitize_and_check(phi_file: Path, clean_file: Path, capsys, monkeypatch) -> None:

@@ -75,7 +75,7 @@ For Claude Code, add a `PreToolUse` hook in `.claude/settings.json` that blocks 
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "Read|NotebookRead",
         "hooks": [{ "type": "command", "command": "auscult guard-hook" }]
       }
     ]
@@ -83,7 +83,7 @@ For Claude Code, add a `PreToolUse` hook in `.claude/settings.json` that blocks 
 }
 ```
 
-The hook reads the file path from `tool_input.file_path` or `tool_input.path`. It blocks a file that cannot be scanned and allows paths that do not exist. It does not inspect shell commands, so pair it with sandbox or permission rules.
+The hook reads the file path from `tool_input.file_path` or `tool_input.path`. It blocks a file that cannot be scanned and allows paths that do not exist. It does not inspect shell commands or search tools such as `Grep`, so pair it with sandbox or permission rules.
 
 ## Important limitation
 

@@ -30,12 +30,33 @@ def run_demo() -> str:
     return tracer.run_id
 
 
+def display_database_url() -> str:
+    """The active ``DATABASE_URL`` with any password masked."""
+    from sqlalchemy.engine import make_url
+
+    return make_url(os.environ["DATABASE_URL"]).render_as_string(hide_password=True)
+
+
+def follow_up_commands(run_id: str) -> list[str]:
+    """Commands to inspect and replay the demo run.
+
+    The URL is only spelled out for the default demo database, which has no
+    credentials. A configured ``DATABASE_URL`` is left to the environment so
+    its password is never printed.
+    """
+    prefix = ""
+    if os.environ["DATABASE_URL"] == DEFAULT_DEMO_DATABASE_URL:
+        prefix = f"DATABASE_URL={DEFAULT_DEMO_DATABASE_URL} "
+    return [f"{prefix}auscult run {run_id}", f"{prefix}auscult replay {run_id}"]
+
+
 def main() -> None:
     run_id = run_demo()
-    database_url = os.environ["DATABASE_URL"]
+    inspect, replay = follow_up_commands(run_id)
     print(f"Run ID: {run_id}")
-    print(f"Inspect: DATABASE_URL={database_url} uv run auscult run {run_id}")
-    print(f"Replay:  DATABASE_URL={database_url} uv run auscult replay {run_id}")
+    print(f"Inspect: {inspect}")
+    print(f"Replay:  {replay}")
+    print("(From a source checkout, prefix these with `uv run`.)")
 
 
 if __name__ == "__main__":

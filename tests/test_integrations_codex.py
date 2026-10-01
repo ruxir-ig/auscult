@@ -79,6 +79,7 @@ def test_failures_mark_run_failed(db) -> None:
         },
         {"type": "turn.failed", "error": {"message": "stream disconnected"}},
     ]
+    events.insert(0, {"type": "turn.started"})
     with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
         summary = record_codex_events(events, tracer)
 
@@ -95,6 +96,7 @@ def test_failures_mark_run_failed(db) -> None:
 
 def test_phi_in_codex_output_is_sanitized(db) -> None:
     events = [
+        {"type": "turn.started"},
         {
             "type": "item.completed",
             "item": {
@@ -102,14 +104,55 @@ def test_phi_in_codex_output_is_sanitized(db) -> None:
                 "type": "agent_message",
                 "text": "Patient John Smith can be reached at 555-867-5309.",
             },
-        }
+        },
+        {"type": "turn.completed", "usage": {}},
     ]
     with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
-        record_codex_events(events, tracer)
+        summary = record_codex_events(events, tracer)
 
     _, steps = _load(tracer.run_id)
     assert "555-867-5309" not in (steps[0].output or "")
     assert steps[0].redaction_count >= 1
+    # The message returned to callers is sanitized too, not just the stored step.
+    assert summary.final_message is not None
+    assert "555-867-5309" not in summary.final_message
+    assert "John Smith" not in summary.final_message
+
+
+def test_malformed_event_fails_run(db) -> None:
+    lines = FIXTURE.read_text().splitlines()
+    lines.insert(3, '{"type":"item.completed","item":{"id":"item_9"')  # truncated line
+    with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
+        summary = record_codex_events(lines, tracer)
+
+    run, steps = _load(tracer.run_id)
+    assert summary.failed
+    assert run.status == "failed"
+    assert [s.error_message for s in steps if s.error_message] == [
+        "malformed Codex event on line 4"
+    ]
+
+
+@pytest.mark.parametrize("drop", ["turn.completed", "everything after turn.started"])
+def test_truncated_stream_fails_run(db, drop: str) -> None:
+    lines = FIXTURE.read_text().splitlines()
+    if drop == "turn.completed":
+        lines = lines[:-1]
+    else:
+        lines = lines[:2]
+    with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
+        summary = record_codex_events(lines, tracer)
+
+    run, steps = _load(tracer.run_id)
+    assert summary.failed
+    assert run.status == "failed"
+    assert steps[-1].error_message == "Codex stream ended before the turn completed"
+
+
+def test_empty_stream_fails_run(db) -> None:
+    with AuscultTracer(agent_type="codex", initial_prompt="x") as tracer:
+        summary = record_codex_events(["", "codex: warning"], tracer)
+    assert summary.failed
 
 
 @pytest.fixture()

@@ -141,3 +141,22 @@ def test_cmd_demo_json(migrated_db, capsys, monkeypatch) -> None:
     assert run["status"] == "completed"
     assert "Jane Example" not in run["initial_prompt"]
     assert len(run["steps"]) == 1
+
+
+def test_demo_output_hides_database_password(monkeypatch) -> None:
+    from auscult.demo import display_database_url, follow_up_commands
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://auscult:s3cret-pw@db.example:5432/traces")
+    assert "s3cret-pw" not in display_database_url()
+    assert "auscult:***@db.example" in display_database_url()
+    commands = follow_up_commands("run-1")
+    assert commands == ["auscult run run-1", "auscult replay run-1"]
+
+
+def test_demo_commands_spell_out_default_database(monkeypatch) -> None:
+    from auscult.demo import DEFAULT_DEMO_DATABASE_URL, follow_up_commands
+
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DEMO_DATABASE_URL)
+    assert follow_up_commands("run-1")[0] == (
+        f"DATABASE_URL={DEFAULT_DEMO_DATABASE_URL} auscult run run-1"
+    )

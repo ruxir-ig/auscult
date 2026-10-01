@@ -394,8 +394,16 @@ def _cmd_sanitize(paths: list[str], *, check: bool, as_json: bool) -> None:
             if result.redaction_count:
                 print(f"{path}: {result.redaction_count} PHI entities {result.entity_counts}")
     else:
-        for _, result in sources:
-            sys.stdout.write(result.text or "")
+        for index, (path, result) in enumerate(sources):
+            text = result.text or ""
+            if len(sources) > 1:
+                # head(1)-style headers keep file boundaries visible.
+                if index:
+                    print()
+                print(f"==> {path} <==")
+                if text and not text.endswith("\n"):
+                    text += "\n"
+            sys.stdout.write(text)
     if check and found:
         sys.exit(1)
 
@@ -409,7 +417,11 @@ def _cmd_guard_hook() -> None:
     except json.JSONDecodeError as exc:
         print(f"auscult guard-hook: invalid hook payload: {exc}", file=sys.stderr)
         sys.exit(2)
-    decision = check_hook_payload(payload if isinstance(payload, dict) else {})
+    try:
+        decision = check_hook_payload(payload if isinstance(payload, dict) else {})
+    except Exception as exc:  # noqa: BLE001 — a hook error must still block (exit 2)
+        print(f"auscult guard-hook: blocked after internal error: {exc}", file=sys.stderr)
+        sys.exit(2)
     if not decision.allow:
         print(f"Blocked by auscult guard-hook: {decision.reason}", file=sys.stderr)
         sys.exit(2)
@@ -452,11 +464,18 @@ def _cmd_codex(
 
 
 def _cmd_demo(*, as_json: bool) -> None:
+    from .demo import display_database_url, follow_up_commands, run_demo
     from .demo import main as demo_main
-    from .demo import run_demo
 
     if as_json:
-        _emit_json({"run_id": run_demo(), "database_url": os.environ["DATABASE_URL"]})
+        run_id = run_demo()
+        _emit_json(
+            {
+                "run_id": run_id,
+                "database_url": display_database_url(),
+                "commands": follow_up_commands(run_id),
+            }
+        )
     else:
         demo_main()
 
