@@ -31,7 +31,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from ..capture import AuscultTracer
+from ..db import get_session
+from ..models import Step
 from ..sanitizer import Sanitizer
 from ._serialize import to_text
 
@@ -42,6 +46,7 @@ class CodexSummary:
 
     thread_id: str | None = None
     final_message: str | None = None
+    final_message_step: int | None = None
     failed: bool = False
     usage: dict[str, Any] | None = None
 
@@ -74,8 +79,11 @@ def record_codex_events(
     completes, so a truncated capture is never reported as a success.
 
     ``summary.final_message`` is sanitized with ``sanitizer`` (default: a
-    new :class:`Sanitizer` seeded from the run id). Do not pass a sanitizer
-    that a background tracer's worker thread is using.
+    new :class:`Sanitizer` seeded from the run id), so its synthetic values
+    can differ from the stored step's. For the exact stored text, read step
+    ``summary.final_message_step`` after the tracer finishes, as
+    :func:`run_codex` and :func:`ingest_codex_events` do. Do not pass a
+    sanitizer that a background tracer's worker thread is using.
     """
     summary = CodexSummary()
     turn_open = False
@@ -102,9 +110,11 @@ def record_codex_events(
                 if not isinstance(item, Mapping):
                     continue
                 command, output, error = _item_step(item)
+                step_index = tracer.step_count
                 tracer.record_step(command, output=output, error_message=error)
                 if item.get("type") == "agent_message":
                     raw_final_message = item.get("text")
+                    summary.final_message_step = step_index
                 if error is not None:
                     summary.failed = True
             case "turn.started":
@@ -160,7 +170,7 @@ def ingest_codex_events(
         ) as tracer,
         path.open(encoding="utf-8") as fh,
     ):
-        summary = record_codex_events(fh, tracer, sanitizer=_caller_sanitizer(tracer_kwargs))
+        summary = record_codex_events(fh, tracer)
     return _result(tracer, summary, exit_code=None)
 
 
@@ -190,9 +200,7 @@ def run_codex(
         )
         assert process.stdout is not None
         with process:
-            summary = record_codex_events(
-                process.stdout, tracer, sanitizer=_caller_sanitizer(tracer_kwargs)
-            )
+            summary = record_codex_events(process.stdout, tracer)
         exit_code = process.returncode
     except BaseException:
         tracer.finish(crashed=True)
@@ -205,19 +213,29 @@ def _result(tracer: AuscultTracer, summary: CodexSummary, *, exit_code: int | No
     return CodexResult(
         run_id=tracer.run_id,
         thread_id=summary.thread_id,
-        final_message=summary.final_message,
+        final_message=_stored_final_message(tracer, summary),
         failed=summary.failed or bool(exit_code),
         exit_code=exit_code,
         usage=summary.usage,
     )
 
 
-def _caller_sanitizer(tracer_kwargs: Mapping[str, Any]) -> Sanitizer | None:
-    """The caller's sanitizer, unless a background worker thread owns it."""
-    if tracer_kwargs.get("background"):
-        return None
-    sanitizer = tracer_kwargs.get("sanitizer")
-    return sanitizer if isinstance(sanitizer, Sanitizer) else None
+def _stored_final_message(tracer: AuscultTracer, summary: CodexSummary) -> str | None:
+    """The final agent message exactly as stored, so pseudonyms match the trace.
+
+    Falls back to ``summary.final_message`` (also sanitized) when the run is
+    not finished or the step is missing.
+    """
+    if not tracer.finished or summary.final_message_step is None:
+        return summary.final_message
+    with get_session() as session:
+        stored = session.scalar(
+            select(Step.output).where(
+                Step.run_id == tracer.run_id,
+                Step.step_index == summary.final_message_step,
+            )
+        )
+    return stored if stored is not None else summary.final_message
 
 
 def _decode(raw: str | Mapping[str, Any]) -> Mapping[str, Any] | None:

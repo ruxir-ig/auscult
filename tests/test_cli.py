@@ -157,6 +157,8 @@ def test_demo_commands_spell_out_default_database(monkeypatch) -> None:
     from auscult.demo import DEFAULT_DEMO_DATABASE_URL, follow_up_commands
 
     monkeypatch.setenv("DATABASE_URL", DEFAULT_DEMO_DATABASE_URL)
-    assert follow_up_commands("run-1")[0] == (
-        f"DATABASE_URL={DEFAULT_DEMO_DATABASE_URL} auscult run run-1"
-    )
+    assert follow_up_commands("run-1") == [
+        f"export DATABASE_URL={DEFAULT_DEMO_DATABASE_URL}",
+        "auscult run run-1",
+        "auscult replay run-1",
+    ]

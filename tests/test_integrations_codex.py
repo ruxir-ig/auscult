@@ -119,6 +119,32 @@ def test_phi_in_codex_output_is_sanitized(db) -> None:
     assert "John Smith" not in summary.final_message
 
 
+@pytest.mark.parametrize("background", [False, True])
+def test_returned_final_message_matches_stored_step(db, tmp_path: Path, background: bool) -> None:
+    # The same name appears earlier in the stream, so a fresh sanitizer would
+    # start its fake-value sequence over and pick a different pseudonym.
+    events = [
+        {"type": "turn.started"},
+        {
+            "type": "item.completed",
+            "item": {"id": "item_0", "type": "reasoning", "text": "Mary Johnson needs review."},
+        },
+        {
+            "type": "item.completed",
+            "item": {"id": "item_1", "type": "agent_message", "text": "Call John Smith today."},
+        },
+        {"type": "turn.completed", "usage": {}},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    result = ingest_codex_events(path, prompt="x", background=background)
+
+    _, steps = _load(result.run_id)
+    assert result.final_message == steps[1].output
+    assert "John Smith" not in (result.final_message or "")
+
+
 def test_malformed_event_fails_run(db) -> None:
     lines = FIXTURE.read_text().splitlines()
     lines.insert(3, '{"type":"item.completed","item":{"id":"item_9"')  # truncated line

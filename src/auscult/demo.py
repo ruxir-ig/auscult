@@ -38,25 +38,27 @@ def display_database_url() -> str:
 
 
 def follow_up_commands(run_id: str) -> list[str]:
-    """Commands to inspect and replay the demo run.
+    """Shell commands to inspect and replay the demo run.
 
-    The URL is only spelled out for the default demo database, which has no
-    credentials. A configured ``DATABASE_URL`` is left to the environment so
-    its password is never printed.
+    The URL is only spelled out (as a separate ``export``) for the default
+    demo database, which has no credentials. A configured ``DATABASE_URL`` is
+    left to the environment so its password is never printed. Keeping the
+    export on its own line means each ``auscult`` command can be prefixed
+    with ``uv run`` as-is.
     """
-    prefix = ""
+    commands = [f"auscult run {run_id}", f"auscult replay {run_id}"]
     if os.environ["DATABASE_URL"] == DEFAULT_DEMO_DATABASE_URL:
-        prefix = f"DATABASE_URL={DEFAULT_DEMO_DATABASE_URL} "
-    return [f"{prefix}auscult run {run_id}", f"{prefix}auscult replay {run_id}"]
+        commands.insert(0, f"export DATABASE_URL={DEFAULT_DEMO_DATABASE_URL}")
+    return commands
 
 
 def main() -> None:
     run_id = run_demo()
-    inspect, replay = follow_up_commands(run_id)
     print(f"Run ID: {run_id}")
-    print(f"Inspect: {inspect}")
-    print(f"Replay:  {replay}")
-    print("(From a source checkout, prefix these with `uv run`.)")
+    print("Inspect and replay it with:")
+    for command in follow_up_commands(run_id):
+        print(f"  {command}")
+    print("(From a source checkout, run the auscult commands as `uv run auscult ...`.)")
 
 
 if __name__ == "__main__":

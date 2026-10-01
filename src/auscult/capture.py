@@ -107,6 +107,11 @@ class AuscultTracer:
     def finished(self) -> bool:
         return self._finished
 
+    @property
+    def step_count(self) -> int:
+        """Steps recorded so far; also the index the next step will get."""
+        return self._step_count
+
     def _ensure_active(self) -> None:
         if self._finished:
             raise RuntimeError("Cannot use AuscultTracer after finish()")
