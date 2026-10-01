@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a0f774-9483-7e91-844b-c4d72f038782"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run `cat note.txt`.\n"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat note.txt'","aggregated_output":"Patient note: follow up in 2 weeks.\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":47486,"cached_input_tokens":36736,"cache_write_input_tokens":0,"output_tokens":49,"reasoning_output_tokens":0}}
